@@ -1,17 +1,18 @@
 [project]
 name = "office-lite"
-version = "0.1.1"
+version = "0.1.2"
 description = "Lightweight local stdio MCP server for md/txt/docx/pptx/csv conversion"
 license = { text = "MIT" }
 requires-python = ">=3.11"
 dependencies = [
   # Direct floors double as transitive pins: python-docx and python-pptx
   # allow older lxml and Pillow ranges with known CVEs, so these floors
-  # force the secure versions verified in the audit.
-  "mcp>=2.3.0",
-  "lxml>=6.1.3",
-  "Pillow>=13.0.0",
-  "markdown-it-py>=4.2.0",
+  # force the secure versions verified in the audit. Ceilings guard the
+  # next breaking major; bump deliberately with a fresh advisory check.
+  "mcp>=2.3.0,<3",
+  "lxml>=6.1.3,<7",
+  "Pillow>=13.0.0,<14",
+  "markdown-it-py>=4.2.0,<5",
   "python-docx==1.2.0",
   "python-pptx==1.0.2",
   "defusedxml==0.7.1",
