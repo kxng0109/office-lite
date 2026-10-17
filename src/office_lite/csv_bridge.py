@@ -23,12 +23,19 @@ def read_csv_text(text: str, delimiter: str = ",") -> tuple[list[str], list[list
     return rows[0], rows[1:]
 
 
-def rows_to_markdown(header: list[str], rows: list[list[str]]) -> str:
+def rows_to_markdown(
+    header: list[str], rows: list[list[str]], char_limit: int | None = None
+) -> str:
     out = ["| " + " | ".join(sanitize_md_cell(c) for c in header) + " |"]
     out.append("| " + " | ".join("---" for _ in header) + " |")
+    size = sum(len(line) + 1 for line in out)
     for row in rows:
         padded = (row + [""] * len(header))[: len(header)]
-        out.append("| " + " | ".join(sanitize_md_cell(c) for c in padded) + " |")
+        line = "| " + " | ".join(sanitize_md_cell(c) for c in padded) + " |"
+        size += len(line) + 1
+        if char_limit is not None and size > char_limit:
+            break
+        out.append(line)
     return "\n".join(out) + "\n"
 
 

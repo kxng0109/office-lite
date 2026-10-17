@@ -6,6 +6,7 @@ import base64
 import binascii
 import io
 import logging
+import sys
 import zipfile
 
 from docx import Document
@@ -33,7 +34,7 @@ server: MCPServer = MCPServer(name="office-lite")
 
 TOOLS_INDEX = [
     ("convert_markdown", "Convert markdown or plain text to docx or pptx bytes"),
-    ("convert_table_in", "Convert csv text to docx, pptx, or markdown table"),
+    ("convert_table_in", "Convert csv text to docx, pptx, markdown table, or normalized csv"),
     ("convert_office_out", "Extract docx or pptx bytes to markdown, text, or csv"),
     ("create_from_outline", "Create docx or pptx from heading outline"),
     ("inspect_office", "Inspect docx or pptx bytes for counts without full convert"),
@@ -81,10 +82,6 @@ def _walk_shapes(shapes):
 def convert_markdown(
     content: str, target: str, title: str = "Document", flavor: str = "markdown"
 ) -> str:
-    try:
-        check_size(content.encode("utf-8"))
-    except UnicodeEncodeError as exc:
-        raise ValueError("invalid text encoding") from exc
     if target not in ("docx", "pptx"):
         raise ValueError("target must be docx or pptx")
     if flavor not in ("markdown", "text"):
@@ -104,7 +101,7 @@ def convert_table_in(csv_text: str, target: str, title: str = "Table", delimiter
     check_title(title)
     header, rows = read_csv_text(csv_text, delimiter)
     if target == "markdown":
-        return truncate_text(rows_to_markdown(header, rows), TRUNCATE_CHARS)
+        return truncate_text(rows_to_markdown(header, rows, TRUNCATE_CHARS), TRUNCATE_CHARS)
     if target == "csv":
         return rows_to_csv_text(header, rows)
     data = (
@@ -136,7 +133,7 @@ def convert_office_out(file_b64: str, source: str, target: str) -> str:
             if target == "csv":
                 tables.append(rows_to_csv_text(header, rows))
             else:
-                tables.append(rows_to_markdown(header, rows))
+                tables.append(rows_to_markdown(header, rows, TRUNCATE_CHARS))
         if target == "csv":
             return truncate_text("\n".join(tables), TRUNCATE_CHARS)
         text = "\n\n".join(paras + tables)
@@ -155,7 +152,7 @@ def convert_office_out(file_b64: str, source: str, target: str) -> str:
                 if target == "csv":
                     csv_parts.append(rows_to_csv_text(header, rows))
                 else:
-                    parts.append(rows_to_markdown(header, rows))
+                    parts.append(rows_to_markdown(header, rows, TRUNCATE_CHARS))
             elif shape.has_text_frame:
                 if shape.text.strip():
                     parts.append(shape.text.strip())
@@ -208,7 +205,15 @@ def search(query: str, limit: int = 10) -> str:
 
 
 def main() -> None:
-    server.run()
+    logging.basicConfig(
+        level=logging.INFO, stream=sys.stderr, format="office-lite %(levelname)s %(message)s"
+    )
+    logger.info("starting office-lite stdio server")
+    try:
+        server.run()
+    except Exception:
+        logger.warning("server stopped with error")
+        raise
 
 
 if __name__ == "__main__":
