@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import io
+import threading
 
 from pptx import Presentation
 from pptx.util import Inches
@@ -14,9 +15,20 @@ MAX_BULLETS_PER_SLIDE = 20
 MAX_CODE_CHARS = 2000
 ROWS_PER_SLIDE = 15
 
+_cached_template: bytes | None = None
+_template_lock = threading.Lock()
+
 
 def _new_deck() -> Presentation:
-    prs = Presentation()
+    """Fresh deck from a cached default template (bytes are re-parsed per call)."""
+    global _cached_template
+    if _cached_template is None:
+        with _template_lock:
+            if _cached_template is None:
+                buf = io.BytesIO()
+                Presentation().save(buf)
+                _cached_template = buf.getvalue()
+    prs = Presentation(io.BytesIO(_cached_template))
     prs.slide_width = Inches(13.33)
     prs.slide_height = Inches(7.5)
     return prs

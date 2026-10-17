@@ -12,28 +12,32 @@ from .guards import (
     MAX_HEADING_CHARS,
     MAX_HEADINGS,
     MAX_INPUT_BYTES,
+    MAX_LINE_CHARS,
     MAX_LINES,
+    MAX_LIST_DEPTH,
     MAX_PARA_CHARS,
     MAX_TABLE_COLS,
     MAX_TABLE_ROWS,
+    MAX_TABLES,
     MAX_TEXT_BLOCKS,
+    MAX_TOTAL_CELLS,
     check_size,
 )
 
-_parser: MarkdownIt | None = None
-# RLock (not Lock): parse call sites already hold this lock when they reach
-# the lazy init inside get_parser; a plain Lock would self-deadlock.
-_parser_lock = threading.RLock()
+_local = threading.local()
+_init_lock = threading.RLock()
 
 
 def get_parser() -> MarkdownIt:
-    """Shared parser; stdio transport serves one request at a time."""
-    global _parser
-    if _parser is None:
-        with _parser_lock:
-            if _parser is None:
-                _parser = MarkdownIt("commonmark").enable("table")
-    return _parser
+    """Thread-local parser; stdio transport serves one request at a time."""
+    parser = getattr(_local, "parser", None)
+    if parser is None:
+        with _init_lock:
+            parser = getattr(_local, "parser", None)
+            if parser is None:
+                parser = MarkdownIt("commonmark").enable("table")
+                _local.parser = parser
+    return parser
 
 
 @dataclass
@@ -80,6 +84,9 @@ def _inline_text(token) -> str:
 def _check_text_size(text: str) -> None:
     if text.count("\n") + 1 > MAX_LINES:
         raise ValueError("input exceeds line cap")
+    for line in text.splitlines():
+        if len(line) > MAX_LINE_CHARS:
+            raise ValueError("input line exceeds length cap")
     try:
         check_size(text.encode("utf-8"))
     except UnicodeEncodeError as exc:
@@ -88,6 +95,8 @@ def _check_text_size(text: str) -> None:
 
 def _consume_list(tokens, i: int, stack: list[list], blocks: DocBlocks) -> int:
     """Consume one markdown list including nested lists; preserves document order."""
+    if len(stack) >= MAX_LIST_DEPTH:
+        raise ValueError("list nesting exceeds depth cap")
     ordered = tokens[i].type == "ordered_list_open"
     stack.append(["ordered" if ordered else "bullet", 0])
     depth = len(stack) - 1
@@ -123,8 +132,7 @@ def _consume_list(tokens, i: int, stack: list[list], blocks: DocBlocks) -> int:
 def parse_markdown(text: str) -> DocBlocks:
     _check_text_size(text)
     blocks = DocBlocks()
-    with _parser_lock:
-        tokens = get_parser().parse(text)
+    tokens = get_parser().parse(text)
     i = 0
     list_stack: list[list] = []
     while i < len(tokens):
@@ -170,10 +178,12 @@ def parse_markdown(text: str) -> DocBlocks:
                         header = current[:MAX_TABLE_COLS]
                     else:
                         rows.append(current[:MAX_TABLE_COLS])
-                        if len(rows) >= MAX_TABLE_ROWS:
-                            break
+                        if len(rows) > MAX_TABLE_ROWS:
+                            raise ValueError("table exceeds row cap")
                     current = []
                 j += 1
+            if len(blocks.tables) >= MAX_TABLES:
+                raise ValueError("document exceeds table cap")
             blocks.tables.append(TableBlock(header=header, rows=rows))
             i = j + 1
         else:
@@ -197,6 +207,11 @@ def _enforce_caps(blocks: DocBlocks) -> None:
         raise ValueError("document exceeds code-block cap")
     if any(len(code) > MAX_INPUT_BYTES for code in blocks.codes):
         raise ValueError("code block exceeds length cap")
+    if len(blocks.tables) > MAX_TABLES:
+        raise ValueError("document exceeds table cap")
+    total_cells = sum(len(t.header) * (len(t.rows) + 1) for t in blocks.tables)
+    if total_cells > MAX_TOTAL_CELLS:
+        raise ValueError("document exceeds total cell cap")
 
 
 def parse_text(text: str) -> DocBlocks:
