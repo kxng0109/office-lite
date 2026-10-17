@@ -23,7 +23,11 @@ _template_lock = threading.Lock()
 
 
 def _new_doc() -> Document:
-    """Fresh document from a cached default template (bytes re-parsed per call)."""
+    """Fresh document from a cached default template (bytes re-parsed per call).
+
+    See _new_deck in pptx_build.py: caching avoids file I/O, re-parsing
+    preserves per-request isolation.
+    """
     global _cached_template
     if _cached_template is None:
         with _template_lock:

@@ -2,6 +2,15 @@
 
 All notable changes follow Semantic Versioning.
 
+## [0.1.5] - 2026-10-17
+
+### Fixed
+
+- UTF-16/32 and BOM-aware entity scan instead of raw-byte substring match.
+- Chunked, budget-capped audit reads that verify actual decompressed sizes.
+- URL scheme allowlist for rendered markdown links plus forgery-pattern defanging.
+- Fail-fast invalid UTF-8 handling, per-request structured logging, single-pass size pre-check.
+
 ## [0.1.4] - 2026-10-17
 
 ### Fixed

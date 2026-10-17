@@ -29,6 +29,8 @@ from .guards import (
     check_outline,
     check_size,
     check_title,
+    defang_link_forgery,
+    safe_link,
     truncate_text,
 )
 from .md_parse import DocBlocks, parse_markdown, parse_text
@@ -66,6 +68,8 @@ def _decode_office_b64(file_b64: str) -> bytes:
 def _open_docx(raw: bytes):
     try:
         return Document(io.BytesIO(raw))
+    except MemoryError:
+        raise
     except ValueError:
         raise
     except Exception as exc:
@@ -75,6 +79,8 @@ def _open_docx(raw: bytes):
 def _open_pptx(raw: bytes):
     try:
         return Presentation(io.BytesIO(raw))
+    except MemoryError:
+        raise
     except ValueError:
         raise
     except Exception as exc:
@@ -102,6 +108,8 @@ def _merge_tables(
     rows: list[list[str]] = []
     for _, block_rows in parts:
         rows.extend(block_rows)
+        if len(rows) > MAX_TABLE_ROWS:
+            raise ValueError("merged table exceeds row cap")
     return header, rows
 
 
@@ -133,6 +141,8 @@ def _docx_para_markdown(paragraph) -> str:
     """Paragraph text with hyperlinks preserved as [text](url)."""
     try:
         links = {h._hyperlink: (h.text, h.url) for h in paragraph.hyperlinks}
+    except MemoryError:
+        raise
     except Exception:
         links = {}
     parts: list[str] = []
@@ -140,10 +150,11 @@ def _docx_para_markdown(paragraph) -> str:
         tag = child.tag.split("}")[-1] if isinstance(child.tag, str) else ""
         if tag == "hyperlink":
             text, url = links.get(child, (_w_t_text(child), ""))
-            parts.append(f"[{text}]({url})" if url else text)
+            parts.append(safe_link(text, url))
         elif tag == "r":
             parts.append(_w_t_text(child))
     text = "".join(parts)
+    text = defang_link_forgery(text)
     return text if text.strip() else paragraph.text
 
 
@@ -152,18 +163,23 @@ def _pptx_para_markdown(paragraph) -> str:
     parts: list[str] = []
     try:
         runs = list(paragraph.runs)
+    except MemoryError:
+        raise
     except Exception:
         return paragraph.text
     for run in runs:
         try:
             address = run.hyperlink.address
+        except MemoryError:
+            raise
         except Exception:
             address = ""
         if address:
-            parts.append(f"[{run.text}]({address})")
+            parts.append(safe_link(run.text, address))
         else:
             parts.append(run.text)
     text = "".join(parts)
+    text = defang_link_forgery(text)
     return text if text.strip() else paragraph.text
 
 

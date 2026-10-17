@@ -157,6 +157,54 @@ def test_b64_output_bounded_by_construction():
     assert _b64(b"abc") == "YWJj"
 
 
+def test_utf16_entity_payload_rejected():
+    import zipfile
+
+    from office_lite import guards
+
+    xml = '<?xml version="1.0"?><!DOCTYPE r [<!ENTITY xxe SYSTEM "file:///c:/secret">]><r>&xxe;</r>'
+    payloads = [
+        b"\xff\xfe" + xml.encode("utf-16-le"),
+        xml.encode("utf-16-be"),
+        b"\xff\xfe\x00\x00" + xml.encode("utf-32-le"),
+        xml.encode("utf-8"),
+    ]
+    for body in payloads:
+        buf = io.BytesIO()
+        with zipfile.ZipFile(buf, "w") as archive:
+            archive.writestr("[Content_Types].xml", "<Types/>")
+            archive.writestr("word/document.xml", body)
+        with pytest.raises(ValueError, match="entit|DOCTYPE|unreadable"):
+            guards.audit_zip_bytes(buf.getvalue())
+
+
+def test_undecodable_xml_rejected():
+    import zipfile
+
+    from office_lite import guards
+
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as archive:
+        archive.writestr("[Content_Types].xml", "<Types/>")
+        archive.writestr("word/document.xml", b"\x80\x81\xfe\xff broken \x00\x01")
+    with pytest.raises(ValueError, match="unreadable|entities"):
+        guards.audit_zip_bytes(buf.getvalue())
+
+
+def test_memory_errors_propagate(monkeypatch):
+    import office_lite.server as srv
+
+    def boom(*a, **k):
+        raise MemoryError("simulated OOM")
+
+    monkeypatch.setattr(srv, "Document", boom)
+    with pytest.raises(MemoryError):
+        srv._open_docx(b"PK\x03\x04")
+    monkeypatch.setattr(srv, "Presentation", boom)
+    with pytest.raises(MemoryError):
+        srv._open_pptx(b"PK\x03\x04")
+
+
 def test_wide_md_table_rejected():
     cols = guards.MAX_TABLE_COLS + 1
     header = "| " + " | ".join(f"c{i}" for i in range(cols)) + " |"

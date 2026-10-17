@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import io
+import re
 import zipfile
 
 from defusedxml.common import DefusedXmlException
@@ -80,6 +81,43 @@ def check_size(data: bytes, limit: int = MAX_INPUT_BYTES) -> None:
         raise ValueError("input exceeds size cap")
 
 
+def _decode_xml_part(data: bytes, name: str) -> str:
+    """Decode an XML part for entity scanning, honoring BOM and declaration.
+
+    Tries UTF-8 (with BOM) first, then UTF-16/32 variants. Anything else is
+    rejected: an office part we cannot decode is not safe to pass on.
+    """
+    if data.startswith((b"\xff\xfe\x00\x00", b"\x00\x00\xfe\xff")):
+        return data.decode("utf-32")
+    if data.startswith((b"\xff\xfe", b"\xfe\xff")):
+        return data.decode("utf-16")
+    if data.startswith(b"\xef\xbb\xbf"):
+        return data.decode("utf-8-sig")
+    # BOM-less UTF-16/32: libxml2-style sniffing on leading NULs, since
+    # parsers accept these without a BOM and entities would otherwise hide.
+    if data.startswith((b"\x00\x00\x00<", b"<\x00\x00\x00")):
+        return data.decode("utf-32-be" if data.startswith(b"\x00") else "utf-32-le")
+    if data.startswith(b"\x00<"):
+        return data.decode("utf-16-be")
+    if data.startswith(b"<\x00"):
+        return data.decode("utf-16-le")
+    head = data[:200].decode("ascii", errors="ignore")
+    if "encoding" in head.lower():
+        for encoding in ("utf-8", "utf-16-le", "utf-16-be", "utf-32-le", "utf-32-be"):
+            try:
+                return data.decode(encoding)
+            except (UnicodeDecodeError, LookupError):
+                continue
+        raise ValueError(f"unreadable xml encoding in {name}")
+    try:
+        return data.decode("utf-8")
+    except UnicodeDecodeError as exc:
+        raise ValueError(f"unreadable xml encoding in {name}") from exc
+
+
+_ENTITY_RE = re.compile(r"<!doctype|<!entity", re.IGNORECASE)
+
+
 def audit_zip_bytes(data: bytes) -> None:
     """Enforce zip-entry, expansion, ratio, and entity guards on office bytes."""
     try:
@@ -97,16 +135,29 @@ def audit_zip_bytes(data: bytes) -> None:
             )
             if xml_total > MAX_AUDIT_READ_BYTES:
                 raise ValueError("archive exceeds audit-read cap")
+            # Streamed, bounded read: never trust header sizes for allocation,
+            # and verify the declared size against actual decompressed bytes.
+            # A single entry can never legitimately exceed the audit budget.
+            remaining = MAX_AUDIT_READ_BYTES
             for item in infos:
                 if not item.filename.lower().endswith(_XML_SCAN_EXTS):
                     continue
+                chunks: list[bytes] = []
+                got = 0
                 with archive.open(item, "r") as handle:
-                    head = handle.read(item.file_size).upper()
-                # Verify declared size against actual bytes: lying headers
-                # (zip-bombs) either under-read here or fail as BadZipFile.
-                if len(head) != item.file_size:
+                    while True:
+                        if remaining <= 0:
+                            raise ValueError("archive exceeds audit-read cap")
+                        piece = handle.read(min(65536, remaining))
+                        if not piece:
+                            break
+                        chunks.append(piece)
+                        got += len(piece)
+                        remaining -= len(piece)
+                if got != item.file_size:
                     raise ValueError("archive declares inconsistent sizes")
-                if b"<!DOCTYPE" in head or b"<!ENTITY" in head:
+                text = _decode_xml_part(b"".join(chunks), item.filename)
+                if _ENTITY_RE.search(text):
                     raise DefusedXmlException("document declares entities")
     except zipfile.BadZipFile as exc:
         raise ValueError("unreadable archive") from exc
@@ -148,13 +199,79 @@ def check_outline(headings: object, limit: int = MAX_OUTLINE_ITEMS) -> list[str]
     return cleaned
 
 
+# Formula-trigger characters per OWASP CSV Injection (verified live 2026-10-17):
+# ASCII = + - @, tab/CR/LF, plus fullwidth variants U+FF1D U+FF0B U+FF0D U+FF20.
+# Deliberately NOT included: | % NUL (OWASP lists no such triggers; the DDE
+# | separator only matters inside an already-triggered = formula).
+_TRIGGER_CHARS = (
+    "=",
+    "+",
+    "-",
+    "@",
+    "\t",
+    "\r",
+    "\n",
+    "＝",
+    "＋",
+    "－",
+    "＠",
+)
+
+
 def sanitize_csv_cell(value: object) -> str:
     """Neutralize formula cells with a single convention: quote-prefix."""
     text = value if isinstance(value, str) else str(value)
+    if text and text[0] not in _STRIP_LEAD and text[0] not in _TRIGGER_CHARS:
+        return text
     stripped = text.lstrip(_STRIP_LEAD) if text else text
-    if stripped and stripped[0] in ("=", "+", "-", "@", "\t", "\r", "\n"):
+    if stripped and stripped[0] in _TRIGGER_CHARS:
         return "'" + text
     return text
+
+
+# URL schemes allowed through to markdown output. Anything else
+# (javascript:, data:, file:, vbscript:, blob:) is defanged to plain text.
+_SAFE_LINK_SCHEMES = ("http://", "https://", "mailto:")
+
+_DANGEROUS_LINK_RE = None
+
+
+def _dangerous_link_re():
+    global _DANGEROUS_LINK_RE
+    if _DANGEROUS_LINK_RE is None:
+        import re
+
+        _DANGEROUS_LINK_RE = re.compile(
+            r"\[(?P<label>[^\[\]]*)\]\(\s*(?P<scheme>javascript|data|vbscript|file|blob):",
+            re.IGNORECASE,
+        )
+    return _DANGEROUS_LINK_RE
+
+
+def defang_link_forgery(text: str) -> str:
+    """Escape literal text a markdown renderer would turn into a dangerous link.
+
+    Covers text the source never linkified (e.g. markdown-it refuses to linkify
+    javascript: URLs, leaving literal ``[click](javascript:...)`` prose that a
+    downstream renderer may still linkify).
+    """
+    return _dangerous_link_re().sub(lambda m: "\\[" + m.group(0)[1:], text)
+
+
+def safe_link(label: str, url: str) -> str:
+    """Render a markdown link, defanging dangerous schemes and forged syntax."""
+    text = label.replace("[", "\\[").replace("]", "\\]")
+    target = (url or "").strip()
+    if not target:
+        return text
+    low = target.lower()
+    if low.startswith("#"):
+        return f"[{text}]({target})"
+    if not low.startswith(_SAFE_LINK_SCHEMES):
+        return text
+    if any(ch in target for ch in (" ", "(", ")")):
+        return f"[{text}](<{target}>)"
+    return f"[{text}]({target})"
 
 
 def sanitize_md_cell(value: str) -> str:
@@ -162,6 +279,6 @@ def sanitize_md_cell(value: str) -> str:
     text = value.replace("\\", "\\\\").replace("|", "\\|")
     text = text.replace("\r\n", "<br/>").replace("\n", "<br/>").replace("\r", "<br/>")
     stripped = text.lstrip(_STRIP_LEAD)
-    if stripped and stripped[0] in ("=", "+", "-", "@"):
+    if stripped and stripped[0] in _TRIGGER_CHARS:
         return "'" + text
     return text

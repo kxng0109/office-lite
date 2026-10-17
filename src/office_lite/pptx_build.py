@@ -29,7 +29,12 @@ _template_lock = threading.Lock()
 
 
 def _new_deck() -> Presentation:
-    """Fresh deck from a cached default template (bytes are re-parsed per call)."""
+    """Fresh deck from a cached default template (bytes are re-parsed per call).
+
+    The template bytes are cached to skip file I/O, but each call still builds
+    a fresh in-memory package: python-pptx offers no safe way to clone a live
+    presentation, so re-parsing is the price of isolation between requests.
+    """
     global _cached_template
     if _cached_template is None:
         with _template_lock:

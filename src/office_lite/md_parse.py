@@ -22,6 +22,8 @@ from .guards import (
     MAX_TEXT_BLOCKS,
     MAX_TOTAL_CELLS,
     check_size,
+    defang_link_forgery,
+    safe_link,
 )
 
 _local = threading.local()
@@ -71,13 +73,13 @@ def _inline_text(token) -> str:
                         text_parts.append(children[i].content)
                     i += 1
                 label = "".join(text_parts)
-                parts.append(f"[{label}]({href})" if href else label)
+                parts.append(safe_link(label, href))
                 i += 1
                 continue
             if child.content:
                 parts.append(child.content)
             i += 1
-        return "".join(parts)
+        return defang_link_forgery("".join(parts))
     return token.content or ""
 
 
