@@ -7,7 +7,7 @@ import io
 from pptx import Presentation
 from pptx.util import Inches
 
-from .guards import MAX_SLIDES, MAX_TABLE_COLS, check_size
+from .guards import MAX_CELLS, MAX_SLIDES, MAX_TABLE_COLS, check_size
 from .md_parse import DocBlocks, TableBlock
 
 MAX_BULLETS_PER_SLIDE = 20
@@ -44,7 +44,10 @@ def build_pptx(blocks: DocBlocks, title: str = "Deck") -> bytes:
     for _, item in blocks.bullets:
         current_points.append(item)
     chunks.append((current_title, current_points))
-    planned = len(chunks) + len(blocks.tables) + len(blocks.codes) + 1
+    table_pages = sum(
+        max((len(t.rows) + ROWS_PER_SLIDE - 1) // ROWS_PER_SLIDE, 1) for t in blocks.tables
+    )
+    planned = len(chunks) + table_pages + len(blocks.codes) + 1
     if planned > MAX_SLIDES:
         raise ValueError("deck exceeds slide cap")
     if chunks and not chunks[-1][1] and chunks[-1][0] == title and len(chunks) > 1:
@@ -67,8 +70,16 @@ def build_pptx(blocks: DocBlocks, title: str = "Deck") -> bytes:
             marker.text = "... (truncated)"
             marker.level = 0
     for table in blocks.tables:
-        slide = prs.slides.add_slide(prs.slide_layouts[5])
-        _add_table(slide, table)
+        if len(table.header) * (len(table.rows) + 1) > MAX_CELLS:
+            raise ValueError("table exceeds cell cap")
+        for start in range(0, max(len(table.rows), 1), ROWS_PER_SLIDE):
+            slide = prs.slides.add_slide(prs.slide_layouts[5])
+            _add_table(
+                slide,
+                TableBlock(header=table.header, rows=table.rows[start : start + ROWS_PER_SLIDE]),
+            )
+            if not table.rows:
+                break
     for code in blocks.codes:
         slide = prs.slides.add_slide(prs.slide_layouts[5])
         box = slide.shapes.add_textbox(Inches(0.5), Inches(0.5), Inches(12), Inches(6))

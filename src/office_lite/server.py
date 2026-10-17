@@ -17,6 +17,7 @@ from pptx.enum.shapes import MSO_SHAPE_TYPE
 from .csv_bridge import read_csv_text, rows_to_csv_text, rows_to_markdown
 from .docx_build import build_docx, build_docx_from_rows
 from .guards import (
+    MAX_GROUP_DEPTH,
     MAX_INPUT_BYTES,
     TRUNCATE_CHARS,
     audit_zip_bytes,
@@ -68,12 +69,21 @@ def _open_pptx(raw: bytes):
         raise ValueError("invalid pptx file") from exc
 
 
-def _walk_shapes(shapes):
-    """Yield shapes recursively, descending into group shapes."""
+def _b64(data: bytes) -> str:
+    # Output size is bounded transitively: base64 expands input by 4/3, and
+    # check_size caps input, so a >13.4 MB response is unreachable by construction.
+    check_size(data)
+    return base64.b64encode(data).decode("ascii")
+
+
+def _walk_shapes(shapes, depth: int = 0):
+    """Yield shapes recursively, descending into group shapes with a depth cap."""
+    if depth > MAX_GROUP_DEPTH:
+        raise ValueError("shape nesting exceeds depth cap")
     for shape in shapes:
         yield shape
         if shape.shape_type == MSO_SHAPE_TYPE.GROUP:
-            yield from _walk_shapes(shape.shapes)
+            yield from _walk_shapes(shape.shapes, depth + 1)
 
 
 @server.tool(
@@ -89,7 +99,7 @@ def convert_markdown(
     check_title(title)
     blocks = parse_markdown(content) if flavor == "markdown" else parse_text(content)
     data = build_docx(blocks, title) if target == "docx" else build_pptx(blocks, title)
-    return base64.b64encode(data).decode("ascii")
+    return _b64(data)
 
 
 @server.tool(
@@ -100,6 +110,8 @@ def convert_table_in(csv_text: str, target: str, title: str = "Table", delimiter
         raise ValueError("target must be docx, pptx, markdown, or csv")
     check_title(title)
     header, rows = read_csv_text(csv_text, delimiter)
+    if not rows and not any(cell.strip() for cell in header):
+        raise ValueError("csv is empty")
     if target == "markdown":
         return truncate_text(rows_to_markdown(header, rows, TRUNCATE_CHARS), TRUNCATE_CHARS)
     if target == "csv":
@@ -109,7 +121,7 @@ def convert_table_in(csv_text: str, target: str, title: str = "Table", delimiter
         if target == "docx"
         else build_pptx_from_rows(header, rows, title)
     )
-    return base64.b64encode(data).decode("ascii")
+    return _b64(data)
 
 
 @server.tool(
@@ -170,7 +182,7 @@ def create_from_outline(headings: list[str], target: str, title: str = "Document
     items = check_outline(headings)
     blocks = DocBlocks(headings=[(1, h) for h in items])
     data = build_docx(blocks, title) if target == "docx" else build_pptx(blocks, title)
-    return base64.b64encode(data).decode("ascii")
+    return _b64(data)
 
 
 @server.tool(
@@ -206,14 +218,16 @@ def search(query: str, limit: int = 10) -> str:
 
 def main() -> None:
     logging.basicConfig(
-        level=logging.INFO, stream=sys.stderr, format="office-lite %(levelname)s %(message)s"
+        level=logging.INFO,
+        stream=sys.stderr,
+        format="%(asctime)s office-lite %(levelname)s %(message)s",
     )
     logger.info("starting office-lite stdio server")
     try:
         server.run()
     except Exception:
-        logger.warning("server stopped with error")
-        raise
+        logger.exception("server stopped with error")
+        raise SystemExit(1) from None
 
 
 if __name__ == "__main__":

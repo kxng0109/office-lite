@@ -10,6 +10,7 @@ from markdown_it import MarkdownIt
 from .guards import (
     MAX_CODE_BLOCKS,
     MAX_HEADINGS,
+    MAX_LINES,
     MAX_TABLE_COLS,
     MAX_TABLE_ROWS,
     MAX_TEXT_BLOCKS,
@@ -17,7 +18,9 @@ from .guards import (
 )
 
 _parser: MarkdownIt | None = None
-_parser_lock = threading.Lock()
+# RLock (not Lock): parse call sites already hold this lock when they reach
+# the lazy init inside get_parser; a plain Lock would self-deadlock.
+_parser_lock = threading.RLock()
 
 
 def get_parser() -> MarkdownIt:
@@ -52,6 +55,8 @@ def _inline_text(token) -> str:
 
 
 def _check_text_size(text: str) -> None:
+    if text.count("\n") + 1 > MAX_LINES:
+        raise ValueError("input exceeds line cap")
     try:
         check_size(text.encode("utf-8"))
     except UnicodeEncodeError as exc:
@@ -95,7 +100,8 @@ def _consume_list(tokens, i: int, stack: list[list], blocks: DocBlocks) -> int:
 def parse_markdown(text: str) -> DocBlocks:
     _check_text_size(text)
     blocks = DocBlocks()
-    tokens = get_parser().parse(text)
+    with _parser_lock:
+        tokens = get_parser().parse(text)
     i = 0
     list_stack: list[list] = []
     while i < len(tokens):
