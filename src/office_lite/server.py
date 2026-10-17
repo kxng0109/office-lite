@@ -7,7 +7,6 @@ import binascii
 import io
 import logging
 import sys
-import zipfile
 
 from docx import Document
 from mcp.server.mcpserver import MCPServer
@@ -58,14 +57,18 @@ def _decode_office_b64(file_b64: str) -> bytes:
 def _open_docx(raw: bytes):
     try:
         return Document(io.BytesIO(raw))
-    except (zipfile.BadZipFile, KeyError, ValueError) as exc:
+    except ValueError:
+        raise
+    except Exception as exc:
         raise ValueError("invalid docx file") from exc
 
 
 def _open_pptx(raw: bytes):
     try:
         return Presentation(io.BytesIO(raw))
-    except (zipfile.BadZipFile, KeyError, ValueError) as exc:
+    except ValueError:
+        raise
+    except Exception as exc:
         raise ValueError("invalid pptx file") from exc
 
 
@@ -74,6 +77,30 @@ def _b64(data: bytes) -> str:
     # check_size caps input, so a >13.4 MB response is unreachable by construction.
     check_size(data)
     return base64.b64encode(data).decode("ascii")
+
+
+def _merge_tables(
+    parts: list[tuple[list[str], list[list[str]]]],
+) -> tuple[list[str], list[list[str]]]:
+    """Merge same-header table fragments (e.g. paginated slides); reject mixed schemas."""
+    if not parts:
+        return [], []
+    header = parts[0][0]
+    if any(h != header for h, _ in parts):
+        raise ValueError("multi-table csv export is unsupported")
+    rows: list[list[str]] = []
+    for _, block_rows in parts:
+        rows.extend(block_rows)
+    return header, rows
+
+
+def _walk_tables(tables):
+    """Yield tables recursively, descending into nested cell tables."""
+    for table in tables:
+        yield table
+        for row in table.rows:
+            for cell in row.cells:
+                yield from _walk_tables(cell.tables)
 
 
 def _walk_shapes(shapes, depth: int = 0):
@@ -137,22 +164,26 @@ def convert_office_out(file_b64: str, source: str, target: str) -> str:
         doc = _open_docx(raw)
         paras = [p.text for p in doc.paragraphs if p.text.strip()]
         tables: list[str] = []
-        for table in doc.tables:
+        csv_blocks: list[tuple[list[str], list[list[str]]]] = []
+        for table in _walk_tables(doc.tables):
             if not table.rows:
                 continue
             header = [c.text for c in table.rows[0].cells]
             rows = [[c.text for c in r.cells] for r in table.rows[1:]]
             if target == "csv":
-                tables.append(rows_to_csv_text(header, rows))
+                csv_blocks.append((header, rows))
             else:
                 tables.append(rows_to_markdown(header, rows, TRUNCATE_CHARS))
         if target == "csv":
-            return truncate_text("\n".join(tables), TRUNCATE_CHARS)
+            if not tables and not csv_blocks:
+                return ""
+            header, rows = _merge_tables(csv_blocks)
+            return truncate_text(rows_to_csv_text(header, rows), TRUNCATE_CHARS)
         text = "\n\n".join(paras + tables)
         return truncate_text(text, TRUNCATE_CHARS)
     prs = _open_pptx(raw)
     slides: list[str] = []
-    csv_parts: list[str] = []
+    csv_blocks: list[tuple[list[str], list[list[str]]]] = []
     for i, slide in enumerate(prs.slides, 1):
         parts = [f"# Slide {i}"]
         for shape in _walk_shapes(slide.shapes):
@@ -162,7 +193,7 @@ def convert_office_out(file_b64: str, source: str, target: str) -> str:
                 header = [c.text for c in shape.table.rows[0].cells]
                 rows = [[c.text for c in r.cells] for r in list(shape.table.rows)[1:]]
                 if target == "csv":
-                    csv_parts.append(rows_to_csv_text(header, rows))
+                    csv_blocks.append((header, rows))
                 else:
                     parts.append(rows_to_markdown(header, rows, TRUNCATE_CHARS))
             elif shape.has_text_frame:
@@ -170,7 +201,10 @@ def convert_office_out(file_b64: str, source: str, target: str) -> str:
                     parts.append(shape.text.strip())
         slides.append("\n\n".join(parts))
     if target == "csv":
-        return truncate_text("\n".join(csv_parts), TRUNCATE_CHARS)
+        if not csv_blocks:
+            return ""
+        header, rows = _merge_tables(csv_blocks)
+        return truncate_text(rows_to_csv_text(header, rows), TRUNCATE_CHARS)
     return truncate_text("\n\n".join(slides), TRUNCATE_CHARS)
 
 
@@ -194,7 +228,9 @@ def inspect_office(file_b64: str, source: str) -> str:
     raw = _decode_office_b64(file_b64)
     if source == "docx":
         doc = _open_docx(raw)
-        return f"paragraphs={len(doc.paragraphs)} tables={len(doc.tables)} bytes={len(raw)}"
+        paras = len([p for p in doc.paragraphs if p.text.strip()])
+        tables = sum(1 for _ in _walk_tables(doc.tables))
+        return f"paragraphs={paras} tables={tables} bytes={len(raw)}"
     prs = _open_pptx(raw)
     tables = sum(1 for s in prs.slides for sh in _walk_shapes(s.shapes) if sh.has_table)
     return f"slides={len(prs.slides)} tables={tables} bytes={len(raw)}"
@@ -204,12 +240,15 @@ def inspect_office(file_b64: str, source: str) -> str:
 def search(query: str, limit: int = 10) -> str:
     if not isinstance(query, str):
         raise ValueError("query must be a string")
-    q = query.strip().lower()[:200]
+    if len(query.strip()) > 200:
+        raise ValueError("query exceeds length cap")
+    q = query.strip().lower()
     if not q:
         raise ValueError("query is required")
     if isinstance(limit, bool) or not isinstance(limit, int):
         raise ValueError("limit must be an integer")
-    limit = max(1, min(limit, 20))
+    if limit < 1 or limit > 20:
+        raise ValueError("limit must be between 1 and 20")
     hits = [
         f"{name}: {desc}" for name, desc in TOOLS_INDEX if q in name.lower() or q in desc.lower()
     ]

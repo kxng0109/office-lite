@@ -9,8 +9,11 @@ from markdown_it import MarkdownIt
 
 from .guards import (
     MAX_CODE_BLOCKS,
+    MAX_HEADING_CHARS,
     MAX_HEADINGS,
+    MAX_INPUT_BYTES,
     MAX_LINES,
+    MAX_PARA_CHARS,
     MAX_TABLE_COLS,
     MAX_TABLE_ROWS,
     MAX_TEXT_BLOCKS,
@@ -50,7 +53,27 @@ class DocBlocks:
 
 def _inline_text(token) -> str:
     if token.children:
-        return "".join(c.content for c in token.children if c.content)
+        parts: list[str] = []
+        i = 0
+        children = token.children
+        while i < len(children):
+            child = children[i]
+            if child.type == "link_open":
+                href = (child.attrs or {}).get("href", "") if child.attrs else ""
+                i += 1
+                text_parts: list[str] = []
+                while i < len(children) and children[i].type != "link_close":
+                    if children[i].content:
+                        text_parts.append(children[i].content)
+                    i += 1
+                label = "".join(text_parts)
+                parts.append(f"[{label}]({href})" if href else label)
+                i += 1
+                continue
+            if child.content:
+                parts.append(child.content)
+            i += 1
+        return "".join(parts)
     return token.content or ""
 
 
@@ -162,10 +185,18 @@ def parse_markdown(text: str) -> DocBlocks:
 def _enforce_caps(blocks: DocBlocks) -> None:
     if len(blocks.headings) > MAX_HEADINGS:
         raise ValueError("document exceeds heading cap")
+    if any(len(text) > MAX_HEADING_CHARS for _, text in blocks.headings):
+        raise ValueError("heading exceeds length cap")
     if len(blocks.paragraphs) + len(blocks.bullets) > MAX_TEXT_BLOCKS:
         raise ValueError("document exceeds text-block cap")
+    if any(len(text) > MAX_PARA_CHARS for text in blocks.paragraphs):
+        raise ValueError("paragraph exceeds length cap")
+    if any(len(item) > MAX_PARA_CHARS for _, item in blocks.bullets):
+        raise ValueError("list item exceeds length cap")
     if len(blocks.codes) > MAX_CODE_BLOCKS:
         raise ValueError("document exceeds code-block cap")
+    if any(len(code) > MAX_INPUT_BYTES for code in blocks.codes):
+        raise ValueError("code block exceeds length cap")
 
 
 def parse_text(text: str) -> DocBlocks:
