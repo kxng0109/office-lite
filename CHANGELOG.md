@@ -12,6 +12,9 @@ All notable changes follow Semantic Versioning.
 - Strict input typing on every tool, control-character titles rejected but emoji-safe, search contract strict.
 - Removed dead path-jail helpers; server is bytes-only and never writes files.
 - Single-source version, corrected changelog math wording.
+- Wide tables fail closed on every path; csv field sizes bounded by the stdlib field limit.
+- Single-pass size checks, cached default templates, per-request stderr logging.
+- Omitted-row counts corrected; silent truncation paths documented or removed.
 
 ## [0.1.2] - 2026-10-17
 

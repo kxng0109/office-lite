@@ -82,11 +82,17 @@ def _inline_text(token) -> str:
 
 
 def _check_text_size(text: str) -> None:
-    if text.count("\n") + 1 > MAX_LINES:
-        raise ValueError("input exceeds line cap")
-    for line in text.splitlines():
-        if len(line) > MAX_LINE_CHARS:
-            raise ValueError("input line exceeds length cap")
+    # Single pass over lines: line count and longest line together.
+    longest = 0
+    count = 0
+    for raw in text.splitlines():
+        count += 1
+        if count > MAX_LINES:
+            raise ValueError("input exceeds line cap")
+        if len(raw) > longest:
+            longest = len(raw)
+            if longest > MAX_LINE_CHARS:
+                raise ValueError("input line exceeds length cap")
     try:
         check_size(text.encode("utf-8"))
     except UnicodeEncodeError as exc:
@@ -174,10 +180,12 @@ def parse_markdown(text: str) -> DocBlocks:
                     cell = _inline_text(inline) if inline is not None else ""
                     current.append(cell)
                 elif t.type == "tr_close":
+                    if len(current) > MAX_TABLE_COLS:
+                        raise ValueError("table exceeds column cap")
                     if in_head:
-                        header = current[:MAX_TABLE_COLS]
+                        header = current
                     else:
-                        rows.append(current[:MAX_TABLE_COLS])
+                        rows.append(current)
                         if len(rows) > MAX_TABLE_ROWS:
                             raise ValueError("table exceeds row cap")
                     current = []
@@ -209,6 +217,9 @@ def _enforce_caps(blocks: DocBlocks) -> None:
         raise ValueError("code block exceeds length cap")
     if len(blocks.tables) > MAX_TABLES:
         raise ValueError("document exceeds table cap")
+    # NOTE: per-cell length on this path is bounded by MAX_LINE_CHARS, as GFM
+    # table cells cannot span lines; csv input relies on the stdlib csv
+    # field-size limit instead.
     total_cells = sum(len(t.header) * (len(t.rows) + 1) for t in blocks.tables)
     if total_cells > MAX_TOTAL_CELLS:
         raise ValueError("document exceeds total cell cap")

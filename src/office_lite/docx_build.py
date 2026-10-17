@@ -10,6 +10,7 @@ from docx import Document
 from .guards import (
     MAX_CELLS,
     MAX_TABLE_COLS,
+    MAX_TABLE_ROWS,
     MAX_TABLES,
     MAX_TOTAL_CELLS,
     check_size,
@@ -80,6 +81,8 @@ def _add_table(doc: Document, table: TableBlock) -> None:
         return
     if len(header) > MAX_TABLE_COLS:
         raise ValueError("table exceeds column cap")
+    if len(table.rows) > MAX_TABLE_ROWS:
+        raise ValueError("table exceeds row cap")
     if len(header) * (len(table.rows) + 1) > MAX_CELLS:
         raise ValueError("table exceeds cell cap")
     grid = doc.add_table(rows=1, cols=len(header))

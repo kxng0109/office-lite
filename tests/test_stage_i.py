@@ -4,7 +4,7 @@ import io
 import pytest
 
 from office_lite import guards
-from office_lite.md_parse import DocBlocks, TableBlock
+from office_lite.md_parse import DocBlocks, TableBlock, parse_markdown
 from office_lite.server import (
     _b64,
     _decode_office_b64,
@@ -155,3 +155,80 @@ def test_template_cache_reused():
 
 def test_b64_output_bounded_by_construction():
     assert _b64(b"abc") == "YWJj"
+
+
+def test_wide_md_table_rejected():
+    cols = guards.MAX_TABLE_COLS + 1
+    header = "| " + " | ".join(f"c{i}" for i in range(cols)) + " |"
+    with pytest.raises(ValueError, match="column cap"):
+        parse_markdown(header + "\n|" + "|".join(["---"] * cols) + "|\n")
+
+
+def test_wide_csv_rejected():
+    header = ",".join(f"c{i}" for i in range(guards.MAX_TABLE_COLS + 1))
+    with pytest.raises(ValueError, match="column cap"):
+        convert_table_in(header + "\n1", "markdown")
+
+
+def test_wide_pptx_build_rejected():
+    from office_lite.pptx_build import build_pptx_from_rows
+
+    with pytest.raises(ValueError, match="column cap"):
+        build_pptx_from_rows([f"c{i}" for i in range(guards.MAX_TABLE_COLS + 1)], [["x"]])
+    with pytest.raises(ValueError, match="row cap"):
+        build_pptx_from_rows(["h"], [["x"] for _ in range(guards.MAX_TABLE_ROWS + 1)])
+
+
+def test_per_cell_cap_enforced():
+    big = "x" * 200000
+    with pytest.raises(ValueError, match="unreadable csv"):
+        convert_table_in(f"h\n{big}", "markdown")
+
+
+def test_zwj_emoji_title_allowed():
+    assert guards.check_title("Family 👨\u200d👩\u200d👧") is None
+    assert guards.check_title("Grüße 日本語 🎉") is None
+
+
+def test_group_nesting_depth_capped():
+    from types import SimpleNamespace
+
+    from office_lite import server as srv
+
+    def nest(depth):
+        if depth == 0:
+            return SimpleNamespace(shape_type=0, shapes=[], has_table=False, has_text_frame=False)
+        return SimpleNamespace(
+            shape_type=6, shapes=[nest(depth - 1)], has_table=False, has_text_frame=False
+        )
+
+    with pytest.raises(ValueError, match="depth cap"):
+        list(srv._walk_shapes([nest(guards.MAX_GROUP_DEPTH + 2)]))
+
+
+def test_bullet_and_code_truncation_marked():
+    md = "# T\n\n" + "\n".join(f"- item {i}" for i in range(30))
+    b64 = convert_markdown(md, "pptx", "T", "markdown")
+    assert b64
+    out = convert_office_out(b64, "pptx", "text")
+    assert "... (truncated)" in out
+
+
+def test_omitted_count_is_exact():
+    from office_lite.csv_bridge import rows_to_markdown
+
+    header = ["h"]
+    rows = [[f"r{i}"] for i in range(10)]
+    out = rows_to_markdown(header, rows, char_limit=30)
+    omitted_line = [line for line in out.splitlines() if "omitted" in line]
+    assert len(omitted_line) == 1
+    shown = sum(1 for line in out.splitlines() if line.startswith("| r"))
+    assert shown + int(omitted_line[0].split("(")[1].split()[0]) == len(rows)
+
+
+def test_tool_logs_input_size(caplog):
+    import logging
+
+    with caplog.at_level(logging.INFO, logger="office_lite.server"):
+        convert_markdown("# Hi", "docx", "T", "markdown")
+    assert any("convert_markdown" in r.message for r in caplog.records)
