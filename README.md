@@ -1,4 +1,4 @@
-# office-lite 0.1.3
+# office-lite 0.1.4
 
 Lightweight local stdio MCP server for md, txt, docx, pptx, csv conversion. No Docker, no server sidecar, no JVM.
 
