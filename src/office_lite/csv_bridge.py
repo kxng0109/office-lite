@@ -9,8 +9,14 @@ from .guards import MAX_TABLE_COLS, MAX_TABLE_ROWS, check_size, sanitize_csv_cel
 
 
 def read_csv_text(text: str, delimiter: str = ",") -> tuple[list[str], list[list[str]]]:
-    check_size(text.encode("utf-8", "ignore"))
-    reader = csv.reader(io.StringIO(text), delimiter=delimiter)
+    if not isinstance(delimiter, str) or len(delimiter) != 1 or delimiter in ("\r", "\n"):
+        raise ValueError("delimiter must be a single character")
+    try:
+        raw = text.encode("utf-8")
+    except UnicodeEncodeError as exc:
+        raise ValueError("invalid text encoding") from exc
+    check_size(raw)
+    reader = csv.reader(io.StringIO(text.lstrip("\ufeff")), delimiter=delimiter)
     rows = [r[:MAX_TABLE_COLS] for r in reader][: MAX_TABLE_ROWS + 1]
     if not rows:
         return [], []

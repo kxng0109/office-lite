@@ -46,11 +46,53 @@ def _inline_text(token) -> str:
     return token.content or ""
 
 
+def _check_text_size(text: str) -> None:
+    try:
+        check_size(text.encode("utf-8"))
+    except UnicodeEncodeError as exc:
+        raise ValueError("invalid text encoding") from exc
+
+
+def _consume_list(tokens, i: int, stack: list[list], blocks: DocBlocks) -> int:
+    """Consume one markdown list including nested lists; preserves document order."""
+    ordered = tokens[i].type == "ordered_list_open"
+    stack.append(["ordered" if ordered else "bullet", 0])
+    depth = len(stack) - 1
+    i += 1
+    while i < len(tokens) and tokens[i].type not in ("bullet_list_close", "ordered_list_close"):
+        if tokens[i].type != "list_item_open":
+            i += 1
+            continue
+        if ordered:
+            stack[-1][1] += 1
+        prefix = f"{stack[-1][1]}. " if ordered else ""
+        slot = len(blocks.bullets)
+        blocks.bullets.append((depth, ""))
+        i += 1
+        parts: list[str] = []
+        while i < len(tokens) and tokens[i].type != "list_item_close":
+            if tokens[i].type == "paragraph_open":
+                inline = tokens[i + 1] if i + 1 < len(tokens) else None
+                if inline is not None:
+                    parts.append(_inline_text(inline))
+                i += 3
+            elif tokens[i].type in ("bullet_list_open", "ordered_list_open"):
+                i = _consume_list(tokens, i, stack, blocks)
+            else:
+                i += 1
+        text = " ".join(p for p in parts if p)
+        blocks.bullets[slot] = (depth, (prefix + text) if text else "")
+        i += 1
+    stack.pop()
+    return i + 1
+
+
 def parse_markdown(text: str) -> DocBlocks:
-    check_size(text.encode("utf-8", "ignore"))
+    _check_text_size(text)
     blocks = DocBlocks()
     tokens = get_parser().parse(text)
     i = 0
+    list_stack: list[list] = []
     while i < len(tokens):
         tok = tokens[i]
         if tok.type == "heading_open":
@@ -65,19 +107,7 @@ def parse_markdown(text: str) -> DocBlocks:
                 blocks.paragraphs.append(_inline_text(inline))
             i += 3
         elif tok.type in ("bullet_list_open", "ordered_list_open"):
-            i += 1
-        elif tok.type == "list_item_open":
-            depth = 0
-            j = i + 1
-            item_text = ""
-            while j < len(tokens) and tokens[j].type != "list_item_close":
-                if tokens[j].type == "paragraph_open":
-                    inline = tokens[j + 1] if j + 1 < len(tokens) else None
-                    if inline is not None:
-                        item_text = _inline_text(inline)
-                j += 1
-            blocks.bullets.append((depth, item_text))
-            i = j + 1
+            i = _consume_list(tokens, i, list_stack, blocks)
         elif tok.type in ("fence", "code_block"):
             blocks.codes.append(tok.content or "")
             i += 1
@@ -128,15 +158,19 @@ def _enforce_caps(blocks: DocBlocks) -> None:
 
 
 def parse_text(text: str) -> DocBlocks:
-    check_size(text.encode("utf-8", "ignore"))
+    _check_text_size(text)
     blocks = DocBlocks()
     for raw in text.splitlines():
         line = raw.strip()
         if not line:
             continue
         if line.startswith("#"):
-            level = len(line) - len(line.lstrip("#"))
-            blocks.headings.append((min(level, 6), line.lstrip("#").strip()))
+            stripped = line.lstrip("#")
+            if stripped.startswith((" ", "\t")) and stripped.strip():
+                level = len(line) - len(line.lstrip("#"))
+                blocks.headings.append((min(level, 6), stripped.strip()))
+            else:
+                blocks.paragraphs.append(line)
         elif line.startswith(("- ", "* ", "+ ")):
             blocks.bullets.append((0, line[2:].strip()))
         else:

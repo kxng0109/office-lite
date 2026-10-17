@@ -10,6 +10,10 @@ from pptx.util import Inches
 from .guards import MAX_SLIDES, MAX_TABLE_COLS, check_size
 from .md_parse import DocBlocks, TableBlock
 
+MAX_BULLETS_PER_SLIDE = 20
+MAX_CODE_CHARS = 2000
+ROWS_PER_SLIDE = 15
+
 
 def _new_deck() -> Presentation:
     prs = Presentation()
@@ -43,22 +47,35 @@ def build_pptx(blocks: DocBlocks, title: str = "Deck") -> bytes:
     planned = len(chunks) + len(blocks.tables) + len(blocks.codes) + 1
     if planned > MAX_SLIDES:
         raise ValueError("deck exceeds slide cap")
+    if chunks and not chunks[-1][1] and chunks[-1][0] == title and len(chunks) > 1:
+        chunks.pop()
+    seen_content = False
     for slide_title, points in chunks:
+        if not points and slide_title == title and seen_content:
+            continue
+        seen_content = True
         slide = prs.slides.add_slide(layout_content)
         slide.shapes.title.text = slide_title
         body = slide.placeholders[1].text_frame
         body.clear()
-        for point in points[:20]:
+        for point in points[:MAX_BULLETS_PER_SLIDE]:
             para = body.add_paragraph()
             para.text = point
             para.level = 0
+        if len(points) > MAX_BULLETS_PER_SLIDE:
+            marker = body.add_paragraph()
+            marker.text = "... (truncated)"
+            marker.level = 0
     for table in blocks.tables:
         slide = prs.slides.add_slide(prs.slide_layouts[5])
         _add_table(slide, table)
     for code in blocks.codes:
         slide = prs.slides.add_slide(prs.slide_layouts[5])
         box = slide.shapes.add_textbox(Inches(0.5), Inches(0.5), Inches(12), Inches(6))
-        box.text_frame.text = code[:2000]
+        text = code[:MAX_CODE_CHARS]
+        if len(code) > MAX_CODE_CHARS:
+            text += "\n... (truncated)"
+        box.text_frame.text = text
     buf = io.BytesIO()
     prs.save(buf)
     data = buf.getvalue()
@@ -68,7 +85,7 @@ def build_pptx(blocks: DocBlocks, title: str = "Deck") -> bytes:
 
 def build_pptx_from_rows(header: list[str], rows: list[list[str]], title: str = "Table") -> bytes:
     prs = _new_deck()
-    per_slide = 15
+    per_slide = ROWS_PER_SLIDE
     pages = max((len(rows) + per_slide - 1) // per_slide, 1)
     if pages > MAX_SLIDES:
         raise ValueError("deck exceeds slide cap")
