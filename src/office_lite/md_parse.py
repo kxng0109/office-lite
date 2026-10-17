@@ -6,7 +6,14 @@ from dataclasses import dataclass, field
 
 from markdown_it import MarkdownIt
 
-from .guards import MAX_TABLE_COLS, MAX_TABLE_ROWS, check_size
+from .guards import (
+    MAX_CODE_BLOCKS,
+    MAX_HEADINGS,
+    MAX_TABLE_COLS,
+    MAX_TABLE_ROWS,
+    MAX_TEXT_BLOCKS,
+    check_size,
+)
 
 _parser: MarkdownIt | None = None
 
@@ -107,7 +114,17 @@ def parse_markdown(text: str) -> DocBlocks:
             i = j + 1
         else:
             i += 1
+    _enforce_caps(blocks)
     return blocks
+
+
+def _enforce_caps(blocks: DocBlocks) -> None:
+    if len(blocks.headings) > MAX_HEADINGS:
+        raise ValueError("document exceeds heading cap")
+    if len(blocks.paragraphs) + len(blocks.bullets) > MAX_TEXT_BLOCKS:
+        raise ValueError("document exceeds text-block cap")
+    if len(blocks.codes) > MAX_CODE_BLOCKS:
+        raise ValueError("document exceeds code-block cap")
 
 
 def parse_text(text: str) -> DocBlocks:
@@ -124,4 +141,5 @@ def parse_text(text: str) -> DocBlocks:
             blocks.bullets.append((0, line[2:].strip()))
         else:
             blocks.paragraphs.append(line)
+    _enforce_caps(blocks)
     return blocks

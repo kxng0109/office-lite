@@ -7,7 +7,7 @@ import io
 from pptx import Presentation
 from pptx.util import Inches
 
-from .guards import MAX_TABLE_COLS, check_size
+from .guards import MAX_SLIDES, MAX_TABLE_COLS, check_size
 from .md_parse import DocBlocks, TableBlock
 
 
@@ -40,6 +40,9 @@ def build_pptx(blocks: DocBlocks, title: str = "Deck") -> bytes:
     for _, item in blocks.bullets:
         current_points.append(item)
     chunks.append((current_title, current_points))
+    planned = len(chunks) + len(blocks.tables) + len(blocks.codes) + 1
+    if planned > MAX_SLIDES:
+        raise ValueError("deck exceeds slide cap")
     for slide_title, points in chunks:
         slide = prs.slides.add_slide(layout_content)
         slide.shapes.title.text = slide_title
@@ -66,6 +69,9 @@ def build_pptx(blocks: DocBlocks, title: str = "Deck") -> bytes:
 def build_pptx_from_rows(header: list[str], rows: list[list[str]], title: str = "Table") -> bytes:
     prs = _new_deck()
     per_slide = 15
+    pages = max((len(rows) + per_slide - 1) // per_slide, 1)
+    if pages > MAX_SLIDES:
+        raise ValueError("deck exceeds slide cap")
     for start in range(0, max(len(rows), 1), per_slide):
         slide = prs.slides.add_slide(prs.slide_layouts[5])
         if slide.shapes.title:

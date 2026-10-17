@@ -5,7 +5,7 @@ from __future__ import annotations
 import csv
 import io
 
-from .guards import MAX_TABLE_COLS, MAX_TABLE_ROWS, check_size, sanitize_csv_cell
+from .guards import MAX_TABLE_COLS, MAX_TABLE_ROWS, check_size, sanitize_csv_cell, sanitize_md_cell
 
 
 def read_csv_text(text: str, delimiter: str = ",") -> tuple[list[str], list[list[str]]]:
@@ -18,14 +18,11 @@ def read_csv_text(text: str, delimiter: str = ",") -> tuple[list[str], list[list
 
 
 def rows_to_markdown(header: list[str], rows: list[list[str]]) -> str:
-    def esc(cell: str) -> str:
-        return cell.replace("|", "\\|")
-
-    out = ["| " + " | ".join(esc(c) for c in header) + " |"]
+    out = ["| " + " | ".join(sanitize_md_cell(c) for c in header) + " |"]
     out.append("| " + " | ".join("---" for _ in header) + " |")
     for row in rows:
         padded = (row + [""] * len(header))[: len(header)]
-        out.append("| " + " | ".join(esc(c) for c in padded) + " |")
+        out.append("| " + " | ".join(sanitize_md_cell(c) for c in padded) + " |")
     return "\n".join(out) + "\n"
 
 

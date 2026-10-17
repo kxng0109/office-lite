@@ -3,14 +3,25 @@
 from __future__ import annotations
 
 import base64
+import binascii
+import io
 import logging
+import zipfile
 
+from docx import Document
 from mcp.server.mcpserver import MCPServer
+from pptx import Presentation
 
 from .csv_bridge import read_csv_text, rows_to_csv_text, rows_to_markdown
 from .docx_build import build_docx, build_docx_from_rows
-from .guards import TRUNCATE_CHARS, check_size, sanitize_csv_cell, truncate_text
-from .md_parse import parse_markdown, parse_text
+from .guards import (
+    MAX_INPUT_BYTES,
+    TRUNCATE_CHARS,
+    audit_zip_bytes,
+    check_size,
+    truncate_text,
+)
+from .md_parse import DocBlocks, parse_markdown, parse_text
 from .pptx_build import build_pptx, build_pptx_from_rows
 
 logger = logging.getLogger(__name__)
@@ -25,6 +36,32 @@ TOOLS_INDEX = [
     ("inspect_office", "Inspect docx or pptx bytes for counts without full convert"),
     ("search", "Search office-lite tools by query"),
 ]
+
+
+def _decode_office_b64(file_b64: str) -> bytes:
+    if len(file_b64) > MAX_INPUT_BYTES * 4 // 3 + 1024:
+        raise ValueError("input exceeds size cap")
+    try:
+        raw = base64.b64decode(file_b64, validate=True)
+    except (binascii.Error, ValueError) as exc:
+        raise ValueError("invalid base64 input") from exc
+    check_size(raw)
+    audit_zip_bytes(raw)
+    return raw
+
+
+def _open_docx(raw: bytes):
+    try:
+        return Document(io.BytesIO(raw))
+    except (zipfile.BadZipFile, KeyError, ValueError) as exc:
+        raise ValueError("invalid docx file") from exc
+
+
+def _open_pptx(raw: bytes):
+    try:
+        return Presentation(io.BytesIO(raw))
+    except (zipfile.BadZipFile, KeyError, ValueError) as exc:
+        raise ValueError("invalid pptx file") from exc
 
 
 @server.tool(
@@ -68,17 +105,14 @@ def convert_office_out(file_b64: str, source: str, target: str) -> str:
         raise ValueError("source must be docx or pptx")
     if target not in ("markdown", "text", "csv"):
         raise ValueError("target must be markdown, text, or csv")
-    raw = base64.b64decode(file_b64)
-    check_size(raw)
+    raw = _decode_office_b64(file_b64)
     if source == "docx":
-        import io
-
-        from docx import Document
-
-        doc = Document(io.BytesIO(raw))
+        doc = _open_docx(raw)
         paras = [p.text for p in doc.paragraphs if p.text.strip()]
         tables: list[str] = []
         for table in doc.tables:
+            if not table.rows:
+                continue
             header = [c.text for c in table.rows[0].cells]
             rows = [[c.text for c in r.cells] for r in table.rows[1:]]
             if target == "csv":
@@ -88,18 +122,16 @@ def convert_office_out(file_b64: str, source: str, target: str) -> str:
         if target == "csv":
             return truncate_text("\n".join(tables), TRUNCATE_CHARS)
         text = "\n\n".join(paras + tables)
-        return truncate_text(sanitize_csv_cell(text) if False else text, TRUNCATE_CHARS)
-    import io
-
-    from pptx import Presentation
-
-    prs = Presentation(io.BytesIO(raw))
+        return truncate_text(text, TRUNCATE_CHARS)
+    prs = _open_pptx(raw)
     slides: list[str] = []
     csv_parts: list[str] = []
     for i, slide in enumerate(prs.slides, 1):
         parts = [f"# Slide {i}"]
         for shape in slide.shapes:
             if shape.has_table:
+                if not shape.table.rows:
+                    continue
                 header = [c.text for c in shape.table.rows[0].cells]
                 rows = [[c.text for c in r.cells] for r in list(shape.table.rows)[1:]]
                 if target == "csv":
@@ -119,8 +151,6 @@ def convert_office_out(file_b64: str, source: str, target: str) -> str:
 def create_from_outline(headings: list[str], target: str, title: str = "Document") -> str:
     if target not in ("docx", "pptx"):
         raise ValueError("target must be docx or pptx")
-    from .md_parse import DocBlocks
-
     blocks = DocBlocks(headings=[(1, h) for h in headings[:50]])
     data = build_docx(blocks, title) if target == "docx" else build_pptx(blocks, title)
     return base64.b64encode(data).decode("ascii")
@@ -130,18 +160,13 @@ def create_from_outline(headings: list[str], target: str, title: str = "Document
     title="Inspect office", description="Inspect docx or pptx bytes for counts without full convert"
 )
 def inspect_office(file_b64: str, source: str) -> str:
-    raw = base64.b64decode(file_b64)
-    check_size(raw)
-    import io
-
+    if source not in ("docx", "pptx"):
+        raise ValueError("source must be docx or pptx")
+    raw = _decode_office_b64(file_b64)
     if source == "docx":
-        from docx import Document
-
-        doc = Document(io.BytesIO(raw))
+        doc = _open_docx(raw)
         return f"paragraphs={len(doc.paragraphs)} tables={len(doc.tables)} bytes={len(raw)}"
-    from pptx import Presentation
-
-    prs = Presentation(io.BytesIO(raw))
+    prs = _open_pptx(raw)
     tables = sum(1 for s in prs.slides for sh in s.shapes if sh.has_table)
     return f"slides={len(prs.slides)} tables={tables} bytes={len(raw)}"
 
