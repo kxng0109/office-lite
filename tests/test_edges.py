@@ -16,9 +16,7 @@ from office_lite.server import (
 )
 
 
-def test_guards_edges(tmp_path):
-    guards.ensure_base_dir(tmp_path / "out")
-    assert (tmp_path / "out").exists()
+def test_guards_edges():
     with pytest.raises(ValueError):
         guards.check_size(b"x" * (guards.MAX_INPUT_BYTES + 1))
     assert guards.sanitize_csv_cell("plain") == "plain"

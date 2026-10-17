@@ -8,7 +8,15 @@ import threading
 from pptx import Presentation
 from pptx.util import Inches
 
-from .guards import MAX_CELLS, MAX_SLIDES, MAX_TABLE_COLS, check_size
+from .guards import (
+    MAX_CELLS,
+    MAX_SLIDES,
+    MAX_TABLE_COLS,
+    MAX_TABLES,
+    MAX_TOTAL_CELLS,
+    check_size,
+    sanitize_csv_cell,
+)
 from .md_parse import DocBlocks, TableBlock
 
 MAX_BULLETS_PER_SLIDE = 20
@@ -59,6 +67,10 @@ def build_pptx(blocks: DocBlocks, title: str = "Deck") -> bytes:
     table_pages = sum(
         max((len(t.rows) + ROWS_PER_SLIDE - 1) // ROWS_PER_SLIDE, 1) for t in blocks.tables
     )
+    if len(blocks.tables) > MAX_TABLES:
+        raise ValueError("document exceeds table cap")
+    if sum(len(t.header or []) * (len(t.rows) + 1) for t in blocks.tables) > MAX_TOTAL_CELLS:
+        raise ValueError("document exceeds total cell cap")
     planned = len(chunks) + table_pages + len(blocks.codes) + 1
     if planned > MAX_SLIDES:
         raise ValueError("deck exceeds slide cap")
@@ -140,8 +152,8 @@ def _add_table(slide, table: TableBlock) -> None:
     )
     tbl = shape.table
     for i, name in enumerate(header):
-        tbl.cell(0, i).text = name
+        tbl.cell(0, i).text = sanitize_csv_cell(name)
     for r, row in enumerate(data_rows, start=1):
         padded = (row + [""] * len(header))[: len(header)]
         for i, value in enumerate(padded):
-            tbl.cell(r, i).text = value
+            tbl.cell(r, i).text = sanitize_csv_cell(value)

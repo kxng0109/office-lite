@@ -26,7 +26,7 @@ Configure opencode v2 under mcp servers as a local stdio command pointing at the
 
 ## Gates
 
-Every change runs ruff format check, ruff check, pip-audit, build, and pytest with 90 percent coverage minimum. Current suite is 48 tests at about 91 percent. Pinned floors for lxml, Pillow, mcp, markdown-it-py, python-docx, python-pptx, and defusedxml are the load-bearing secure versions; transitive ranges in docx and pptx allow older vulnerable releases, so the floors must not be loosened without a fresh advisory check.
+Every change runs ruff format check, ruff check, pip-audit, build, and pytest with 90 percent coverage minimum. Current suite is 82 tests at about 91 percent. Pinned floors for lxml, Pillow, mcp, markdown-it-py, python-docx, python-pptx, and defusedxml are the load-bearing secure versions; transitive ranges in docx and pptx allow older vulnerable releases, so the floors must not be loosened without a fresh advisory check. Hyperlink destinations are preserved as `[text](url)`; nested tables and grouped shapes are recursed with depth caps; multi-table CSV merges only on identical headers and otherwise refuses.
 
 ## Limits
 

@@ -7,6 +7,7 @@ import binascii
 import io
 import logging
 import sys
+import time
 
 from docx import Document
 from mcp.server.mcpserver import MCPServer
@@ -18,6 +19,11 @@ from .docx_build import build_docx, build_docx_from_rows
 from .guards import (
     MAX_GROUP_DEPTH,
     MAX_INPUT_BYTES,
+    MAX_TABLE_COLS,
+    MAX_TABLE_ROWS,
+    MAX_TABLES,
+    MAX_TEXT_BLOCKS,
+    MAX_TOTAL_CELLS,
     TRUNCATE_CHARS,
     audit_zip_bytes,
     check_outline,
@@ -184,9 +190,17 @@ def convert_markdown(
     if flavor not in ("markdown", "text"):
         raise ValueError("flavor must be markdown or text")
     check_title(title)
+    started = time.perf_counter()
     blocks = parse_markdown(content) if flavor == "markdown" else parse_text(content)
     data = build_docx(blocks, title) if target == "docx" else build_pptx(blocks, title)
-    return _b64(data)
+    result = _b64(data)
+    logger.info(
+        "tool=convert_markdown target=%s in=%d ms=%d",
+        target,
+        len(content),
+        int((time.perf_counter() - started) * 1000),
+    )
+    return result
 
 
 @server.tool(
@@ -198,25 +212,48 @@ def convert_table_in(csv_text: str, target: str, title: str = "Table", delimiter
     if target not in ("docx", "pptx", "markdown", "csv"):
         raise ValueError("target must be docx, pptx, markdown, or csv")
     check_title(title)
+    started = time.perf_counter()
     header, rows = read_csv_text(csv_text, delimiter)
     if not rows and not any(cell.strip() for cell in header):
         raise ValueError("csv is empty")
     if target == "markdown":
-        return truncate_text(rows_to_markdown(header, rows, TRUNCATE_CHARS), TRUNCATE_CHARS)
-    if target == "csv":
-        return rows_to_csv_text(header, rows)
-    data = (
-        build_docx_from_rows(header, rows, title)
-        if target == "docx"
-        else build_pptx_from_rows(header, rows, title)
+        out = truncate_text(rows_to_markdown(header, rows, TRUNCATE_CHARS), TRUNCATE_CHARS)
+    elif target == "csv":
+        out = rows_to_csv_text(header, rows)
+    else:
+        data = (
+            build_docx_from_rows(header, rows, title)
+            if target == "docx"
+            else build_pptx_from_rows(header, rows, title)
+        )
+        out = _b64(data)
+    logger.info(
+        "tool=convert_table_in target=%s in=%d ms=%d",
+        target,
+        len(csv_text),
+        int((time.perf_counter() - started) * 1000),
     )
-    return _b64(data)
+    return out
 
 
 @server.tool(
     title="Extract office", description="Extract docx or pptx bytes to markdown, text, or csv"
 )
 def convert_office_out(file_b64: str, source: str, target: str) -> str:
+    started = time.perf_counter()
+    try:
+        return _convert_office_out_inner(file_b64, source, target)
+    finally:
+        logger.info(
+            "tool=convert_office_out source=%s target=%s in=%d ms=%d",
+            source,
+            target,
+            len(file_b64) if isinstance(file_b64, str) else -1,
+            int((time.perf_counter() - started) * 1000),
+        )
+
+
+def _convert_office_out_inner(file_b64: str, source: str, target: str) -> str:
     if source not in ("docx", "pptx"):
         raise ValueError("source must be docx or pptx")
     if target not in ("markdown", "text", "csv"):
@@ -226,13 +263,22 @@ def convert_office_out(file_b64: str, source: str, target: str) -> str:
         doc = _open_docx(raw)
         paras = [_docx_para_markdown(p) for p in doc.paragraphs]
         paras = [p for p in paras if p.strip()]
+        if len(paras) > MAX_TEXT_BLOCKS:
+            raise ValueError("document exceeds text-block cap")
+        raw_tables = [t for t in _walk_tables(doc.tables) if t.rows]
+        if len(raw_tables) > MAX_TABLES:
+            raise ValueError("document exceeds table cap")
+        if sum(len(t.rows[0].cells) * len(t.rows) for t in raw_tables) > MAX_TOTAL_CELLS:
+            raise ValueError("document exceeds total cell cap")
         tables: list[str] = []
         csv_blocks: list[tuple[list[str], list[list[str]]]] = []
-        for table in _walk_tables(doc.tables):
-            if not table.rows:
-                continue
+        for table in raw_tables:
             header = [_docx_para_markdown_cell(c) for c in table.rows[0].cells]
+            if len(header) > MAX_TABLE_COLS:
+                raise ValueError("table exceeds column cap")
             rows = [[_docx_para_markdown_cell(c) for c in r.cells] for r in table.rows[1:]]
+            if len(rows) > MAX_TABLE_ROWS:
+                raise ValueError("table exceeds row cap")
             if target == "csv":
                 csv_blocks.append((header, rows))
             else:
@@ -247,6 +293,16 @@ def convert_office_out(file_b64: str, source: str, target: str) -> str:
     prs = _open_pptx(raw)
     slides: list[str] = []
     csv_blocks: list[tuple[list[str], list[list[str]]]] = []
+    shape_tables: list[tuple[int, object]] = []
+    for i, slide in enumerate(prs.slides, 1):
+        for shape in _walk_shapes(slide.shapes):
+            if shape.has_table and shape.table.rows:
+                shape_tables.append((i, shape.table))
+    if len(shape_tables) > MAX_TABLES:
+        raise ValueError("document exceeds table cap")
+    if sum(len(t.rows[0].cells) * len(t.rows) for _, t in shape_tables) > MAX_TOTAL_CELLS:
+        raise ValueError("document exceeds total cell cap")
+    text_parts = 0
     for i, slide in enumerate(prs.slides, 1):
         parts = [f"# Slide {i}"]
         for shape in _walk_shapes(slide.shapes):
@@ -254,7 +310,11 @@ def convert_office_out(file_b64: str, source: str, target: str) -> str:
                 if not shape.table.rows:
                     continue
                 header = [c.text for c in shape.table.rows[0].cells]
+                if len(header) > MAX_TABLE_COLS:
+                    raise ValueError("table exceeds column cap")
                 rows = [[c.text for c in r.cells] for r in list(shape.table.rows)[1:]]
+                if len(rows) > MAX_TABLE_ROWS:
+                    raise ValueError("table exceeds row cap")
                 if target == "csv":
                     csv_blocks.append((header, rows))
                 else:
@@ -264,6 +324,9 @@ def convert_office_out(file_b64: str, source: str, target: str) -> str:
                     rendered = _pptx_para_markdown(paragraph)
                     if rendered.strip():
                         parts.append(rendered.strip())
+                        text_parts += 1
+                        if text_parts > MAX_TEXT_BLOCKS:
+                            raise ValueError("document exceeds text-block cap")
         slides.append("\n\n".join(parts))
     if target == "csv":
         if not csv_blocks:
@@ -278,16 +341,37 @@ def create_from_outline(headings: list[str], target: str, title: str = "Document
     if target not in ("docx", "pptx"):
         raise ValueError("target must be docx or pptx")
     check_title(title)
+    started = time.perf_counter()
     items = check_outline(headings)
     blocks = DocBlocks(headings=[(1, h) for h in items])
     data = build_docx(blocks, title) if target == "docx" else build_pptx(blocks, title)
-    return _b64(data)
+    result = _b64(data)
+    logger.info(
+        "tool=create_from_outline target=%s items=%d ms=%d",
+        target,
+        len(items),
+        int((time.perf_counter() - started) * 1000),
+    )
+    return result
 
 
 @server.tool(
     title="Inspect office", description="Inspect docx or pptx bytes for counts without full convert"
 )
 def inspect_office(file_b64: str, source: str) -> str:
+    started = time.perf_counter()
+    try:
+        return _inspect_office_inner(file_b64, source)
+    finally:
+        logger.info(
+            "tool=inspect_office source=%s in=%d ms=%d",
+            source,
+            len(file_b64) if isinstance(file_b64, str) else -1,
+            int((time.perf_counter() - started) * 1000),
+        )
+
+
+def _inspect_office_inner(file_b64: str, source: str) -> str:
     if source not in ("docx", "pptx"):
         raise ValueError("source must be docx or pptx")
     raw = _decode_office_b64(file_b64)

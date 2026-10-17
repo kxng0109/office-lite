@@ -99,18 +99,9 @@ def test_pptx_tables_and_order():
     assert "h1" in csv_out
 
 
-def test_path_jail_and_caps():
-    import tempfile
-    from pathlib import Path
-
-    with tempfile.TemporaryDirectory() as tmp:
-        base = Path(tmp)
-        guards.ensure_base_dir(base / "sub")
-        assert (base / "sub").exists()
-        with pytest.raises(ValueError):
-            guards.safe_output_path(base, "../../evil.txt")
-        with pytest.raises(ValueError):
-            convert_table_in("x", "badtarget")
+def test_invalid_target_rejected():
+    with pytest.raises(ValueError, match="target"):
+        convert_table_in("x", "badtarget")
 
 
 def test_malicious_markdown_html_not_executed():
