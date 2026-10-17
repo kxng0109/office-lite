@@ -21,4 +21,4 @@ Every change runs lint, dependency audit, build, and tests with 90 percent cover
 
 ## Limits
 
-Text plus tables plus notes plus basic styling are correct. Pixel themes and native Word charts stay simplified. Inputs are capped at 10 MB with zip entry and table caps, CSV formula cells are sanitized for human sheets, and outputs stay inside the project temp base.
+Text plus tables plus markdown structure are preserved; pixel themes and native Word charts stay simplified. Extra columns beyond the header are dropped and short rows are padded, grouped shapes are recursed but speaker notes are not extracted. Inputs are capped at 10 MB with zip entry, expansion, and ratio caps, oversized decks and tables fail fast instead of building. CSV formula cells are neutralized, markdown table cells escape pipes and newlines. The server is bytes-only and never writes files; all conversion results return inline.
