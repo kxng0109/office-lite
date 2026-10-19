@@ -2,6 +2,15 @@
 
 All notable changes follow Semantic Versioning.
 
+## [0.1.4] - 2026-10-17
+
+### Fixed
+
+- Unicode strip set now covers U+2028/29, NEL, VT/FF, Mongolian, word joiner, soft hyphen, and fullwidth no-break space, with per-codepoint tests.
+- Hyperlink destinations preserved on docx and pptx extraction; nested tables and group shapes recursed with depth caps.
+- Fail-closed wide-table, total-cell, and line-length caps on every ingestion and build path; csv delimiters allowlisted.
+- Per-request stderr logging with sizes and durations; template bytes cached across builds.
+
 ## [0.1.3] - 2026-10-17
 
 ### Fixed
