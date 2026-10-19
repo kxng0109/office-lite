@@ -2,6 +2,17 @@
 
 All notable changes follow Semantic Versioning.
 
+## [0.1.1] - 2026-10-17
+
+### Fixed
+
+- Zip audit normalizes corrupt archives to ValueError, scans entries with an 8 MB audit-read budget, and uses float ratio math.
+- Markdown tables sanitize formula cells and escape structure, csv delimiter allowlist is strict, and empty csv is rejected.
+- Block tables paginate per slide in pptx and enforce a pre-build cell cap in docx.
+- Contracts hardened: strict flavors, sources, titles, outlines, search limits, single CSV convention, and grouped-shape depth cap.
+- Logging goes to stderr with timestamps and startup failures exit non-zero.
+- Added LICENSE (MIT) and requirements.lock.
+
 ## [0.1.0] - 2026-10-17
 
 ### Added

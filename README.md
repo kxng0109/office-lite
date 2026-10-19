@@ -1,4 +1,4 @@
-# office-lite 0.1.0
+# office-lite 0.1.1
 
 Lightweight local stdio MCP server for md, txt, docx, pptx, csv conversion. No Docker, no server sidecar, no JVM.
 
@@ -13,11 +13,20 @@ Lightweight local stdio MCP server for md, txt, docx, pptx, csv conversion. No D
 
 ## Run
 
-Use the project virtual environment on Windows with the MCP Python SDK v2. The server runs over stdio with logs on stderr. Configure opencode v2 under mcp servers as a local stdio command pointing at the venv python and the server module, with explicit cwd, minimal env, and protocol legacy. Status verified: office-lite shows connected in mcp list with live search plus convert plus inspect roundtrip green.
+Requires Python 3.11 or newer (smoke-tested on 3.14). Create the venv and install:
+
+python -m venv .venv
+.venv\Scripts\python -m pip install -e .[dev]
+
+Start the server over stdio (logs go to stderr, never stdout):
+
+.venv\Scripts\python -m office_lite.server
+
+Configure opencode v2 under mcp servers as a local stdio command pointing at the venv python with `-m office_lite.server`, explicit cwd of this project, minimal env, and protocol legacy. Status verified: office-lite shows connected in mcp list with live search plus convert plus inspect roundtrip green.
 
 ## Gates
 
-Every change runs lint, dependency audit, build, and tests with 90 percent coverage minimum. Current suite is 21 tests at about 96 percent.
+Every change runs ruff format check, ruff check, pip-audit, build, and pytest with 90 percent coverage minimum. Current suite is 48 tests at about 91 percent. Pinned floors for lxml, Pillow, mcp, markdown-it-py, python-docx, python-pptx, and defusedxml are the load-bearing secure versions; transitive ranges in docx and pptx allow older vulnerable releases, so the floors must not be loosened without a fresh advisory check.
 
 ## Limits
 
