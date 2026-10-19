@@ -12,6 +12,7 @@ from .guards import (
     MAX_CELLS,
     MAX_SLIDES,
     MAX_TABLE_COLS,
+    MAX_TABLE_ROWS,
     MAX_TABLES,
     MAX_TOTAL_CELLS,
     check_size,
@@ -119,6 +120,12 @@ def build_pptx(blocks: DocBlocks, title: str = "Deck") -> bytes:
 
 
 def build_pptx_from_rows(header: list[str], rows: list[list[str]], title: str = "Table") -> bytes:
+    if len(header) > MAX_TABLE_COLS:
+        raise ValueError("table exceeds column cap")
+    if len(rows) > MAX_TABLE_ROWS:
+        raise ValueError("table exceeds row cap")
+    if len(header) * (len(rows) + 1) > MAX_CELLS:
+        raise ValueError("table exceeds cell cap")
     prs = _new_deck()
     per_slide = ROWS_PER_SLIDE
     pages = max((len(rows) + per_slide - 1) // per_slide, 1)
@@ -145,8 +152,13 @@ def _add_table(slide, table: TableBlock) -> None:
     )
     if not header:
         return
-    header = header[:MAX_TABLE_COLS]
-    data_rows = [r[:MAX_TABLE_COLS] for r in table.rows]
+    if len(header) > MAX_TABLE_COLS:
+        raise ValueError("table exceeds column cap")
+    if len(table.rows) > MAX_TABLE_ROWS:
+        raise ValueError("table exceeds row cap")
+    if len(header) * (len(table.rows) + 1) > MAX_CELLS:
+        raise ValueError("table exceeds cell cap")
+    data_rows = table.rows
     shape = slide.shapes.add_table(
         len(data_rows) + 1, len(header), Inches(0.5), Inches(1.0), Inches(12), Inches(5)
     )

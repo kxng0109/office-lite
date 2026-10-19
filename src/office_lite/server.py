@@ -59,7 +59,7 @@ def _decode_office_b64(file_b64: str) -> bytes:
         raise ValueError("invalid base64 input") from exc
     check_size(raw)
     audit_zip_bytes(raw)
-    logger.info("decode input_b64=%d bytes=%d", len(file_b64), len(raw))
+    logger.debug("decode input_b64=%d bytes=%d", len(file_b64), len(raw))
     return raw
 
 
@@ -86,7 +86,7 @@ def _b64(data: bytes) -> str:
     # check_size caps input, so a >13.4 MB response is unreachable by construction.
     check_size(data)
     text = base64.b64encode(data).decode("ascii")
-    logger.info("encode bytes=%d b64=%d", len(data), len(text))
+    logger.debug("encode bytes=%d b64=%d", len(data), len(text))
     return text
 
 

@@ -102,6 +102,10 @@ def audit_zip_bytes(data: bytes) -> None:
                     continue
                 with archive.open(item, "r") as handle:
                     head = handle.read(item.file_size).upper()
+                # Verify declared size against actual bytes: lying headers
+                # (zip-bombs) either under-read here or fail as BadZipFile.
+                if len(head) != item.file_size:
+                    raise ValueError("archive declares inconsistent sizes")
                 if b"<!DOCTYPE" in head or b"<!ENTITY" in head:
                     raise DefusedXmlException("document declares entities")
     except zipfile.BadZipFile as exc:

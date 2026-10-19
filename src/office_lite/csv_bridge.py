@@ -19,14 +19,20 @@ def read_csv_text(text: str, delimiter: str = ",") -> tuple[list[str], list[list
         raise ValueError("invalid text encoding") from exc
     check_size(raw)
     try:
-        reader = csv.reader(io.StringIO(text.lstrip("\ufeff")), delimiter=delimiter)
+        reader = csv.reader(
+            io.StringIO(text[1:] if text.startswith("\ufeff") else text), delimiter=delimiter
+        )
         header: list[str] = []
         rows: list[list[str]] = []
+        # NOTE: per-cell length is enforced by the stdlib csv field-size
+        # limit; oversized fields raise csv.Error, wrapped below.
         for record in reader:
+            if len(record) > MAX_TABLE_COLS:
+                raise ValueError("table exceeds column cap")
             if not header:
-                header = record[:MAX_TABLE_COLS]
+                header = record
                 continue
-            rows.append(record[:MAX_TABLE_COLS])
+            rows.append(record)
             if len(rows) > MAX_TABLE_ROWS:
                 raise ValueError("table exceeds row cap")
     except csv.Error as exc:
