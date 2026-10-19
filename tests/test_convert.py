@@ -25,8 +25,8 @@ def test_guards_truncate_and_jail(tmp_path):
         raise AssertionError("should jail")
     except ValueError:
         pass
-    assert guards.sanitize_csv_cell("=1+1", True).startswith("\t")
-    assert guards.sanitize_csv_cell("=1+1", False).startswith("'")
+    assert guards.sanitize_csv_cell("=1+1").startswith("'")
+    assert guards.sanitize_csv_cell("plain") == "plain"
 
 
 def test_parse_and_csv():
@@ -38,8 +38,8 @@ def test_parse_and_csv():
     assert header == ["a", "b"]
     md = rows_to_markdown(header, rows)
     assert "| a | b |" in md
-    csv_text = rows_to_csv_text(header, [["=1+1", "x"]], True)
-    assert "\t=1+1" in csv_text
+    csv_text = rows_to_csv_text(header, [["=1+1", "x"]])
+    assert "'=1+1" in csv_text
 
 
 def test_build_docx_pptx_bytes():

@@ -50,19 +50,18 @@ def test_oversized_rejected():
 def test_malformed_b64_and_zip_rejected():
     with pytest.raises(ValueError, match="base64"):
         convert_office_out("!!!not-b64!!!", "docx", "markdown")
-    with pytest.raises(zipfile.BadZipFile):
+    with pytest.raises(ValueError, match="unreadable archive"):
         convert_office_out(base64.b64encode(b"not-a-zip").decode(), "docx", "markdown")
-    with pytest.raises(zipfile.BadZipFile):
+    with pytest.raises(ValueError, match="unreadable archive"):
         inspect_office(base64.b64encode(b"bad").decode(), "docx")
 
 
 def test_csv_injection_sanitized_in_export():
     header = ["a"]
     rows = [["=1+1"], ["+2+2"], ["-3"], ["@sum"], ["\t=4"]]
-    text = rows_to_csv_text(header, rows, True)
-    assert "\t=1+1" in text
-    raw = rows_to_csv_text(header, rows, False)
-    assert "'=1+1" in raw
+    text = rows_to_csv_text(header, rows)
+    assert "'=1+1" in text
+    assert "'\t=4" in text
     header2, rows2 = read_csv_text("a;b\n1;2\n", ";")
     assert header2 == ["a", "b"] and rows2 == [["1", "2"]]
 
@@ -128,7 +127,7 @@ def test_zip_bomb_guard_entries():
         for i in range(3):
             z.writestr(f"word/slide{i}.xml", "<a/>")
     assert zipfile.is_zipfile(io.BytesIO(buf.getvalue()))
-    with pytest.raises(zipfile.BadZipFile):
+    with pytest.raises(ValueError, match="unreadable archive"):
         convert_office_out(base64.b64encode(b"PK-not-office").decode(), "pptx", "text")
 
 

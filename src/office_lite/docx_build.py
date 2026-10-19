@@ -6,7 +6,7 @@ import io
 
 from docx import Document
 
-from .guards import check_size
+from .guards import MAX_CELLS, check_size
 from .md_parse import DocBlocks, TableBlock
 
 
@@ -51,6 +51,8 @@ def _add_table(doc: Document, table: TableBlock) -> None:
     )
     if not header:
         return
+    if len(header) * (len(table.rows) + 1) > MAX_CELLS:
+        raise ValueError("table exceeds cell cap")
     grid = doc.add_table(rows=1, cols=len(header))
     grid.style = "Light Grid Accent 1"
     for i, name in enumerate(header):
