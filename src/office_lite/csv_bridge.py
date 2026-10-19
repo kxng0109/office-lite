@@ -9,6 +9,15 @@ from .guards import MAX_TABLE_COLS, MAX_TABLE_ROWS, check_size, sanitize_csv_cel
 
 _ALLOWED_DELIMITERS = (",", ";", "\t", "|", ":")
 
+# Explicit bound (not ambient default): the stdlib csv module refuses fields
+# larger than this with csv.Error, which read_csv_text converts to ValueError.
+# 128 KiB matches CPython's historical default; do not raise it casually.
+csv.field_size_limit(128 * 1024)
+
+# Explicit bound (not ambient default): oversized fields fail closed here
+# instead of depending on whatever the host interpreter configured.
+csv.field_size_limit(128 * 1024)
+
 
 def read_csv_text(text: str, delimiter: str = ",") -> tuple[list[str], list[list[str]]]:
     if delimiter not in _ALLOWED_DELIMITERS:
@@ -54,12 +63,15 @@ def rows_to_markdown(
         line = "| " + " | ".join(sanitize_md_cell(c) for c in padded) + " |"
         size += len(line) + 1
         if char_limit is not None and size > char_limit:
-            omitted = len(rows) - len(out) + 2
+            omitted = len(rows) - (len(out) - 2)
             break
         out.append(line)
+    text = "\n".join(out) + "\n"
     if omitted > 0:
-        out.append(f"| ... ({omitted} more rows omitted) |")
-    return "\n".join(out) + "\n"
+        # Marker lives outside the table so strict parsers still see a
+        # rectangular grid; humans and machines both see the data loss.
+        text += f"\n... ({omitted} more rows omitted)\n"
+    return text
 
 
 def rows_to_csv_text(header: list[str], rows: list[list[str]]) -> str:
