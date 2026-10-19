@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import io
 import os
+import unicodedata
 import zipfile
 from pathlib import Path
 
@@ -26,9 +27,14 @@ MAX_CODE_BLOCKS = 50
 MAX_OUTLINE_ITEMS = 200
 MAX_TITLE_CHARS = 200
 MAX_HEADING_CHARS = 500
+MAX_PARA_CHARS = 100000
 TRUNCATE_CHARS = 25000
 TRUNCATE_MARKER = "\n[truncated]"
 _XML_SCAN_EXTS = (".xml", ".rels")
+# Spaces, tabs, and Unicode whitespace (NBSP, OGHAM, EM/EN quads, hair/thin
+# spaces, ideographic space, zero-width space/joiners, BOM) stripped before
+# formula-trigger tests so lookalike padding cannot smuggle a trigger past.
+_STRIP_LEAD = " \t               　​‌‍﻿"
 
 
 def check_size(data: bytes, limit: int = MAX_INPUT_BYTES) -> None:
@@ -76,6 +82,8 @@ def truncate_text(text: str, limit: int = TRUNCATE_CHARS) -> str:
 def check_title(title: str, limit: int = MAX_TITLE_CHARS) -> None:
     if not isinstance(title, str) or not title or len(title) > limit:
         raise ValueError("title must be 1-200 characters")
+    if any(unicodedata.category(ch).startswith("C") for ch in title):
+        raise ValueError("title must not contain control characters")
 
 
 def check_outline(headings: object, limit: int = MAX_OUTLINE_ITEMS) -> list[str]:
@@ -110,7 +118,7 @@ def ensure_base_dir(base_dir: Path) -> Path:
 def sanitize_csv_cell(value: object) -> str:
     """Neutralize formula cells with a single convention: quote-prefix."""
     text = value if isinstance(value, str) else str(value)
-    stripped = text.lstrip(" \t") if text else text
+    stripped = text.lstrip(_STRIP_LEAD) if text else text
     if stripped and stripped[0] in ("=", "+", "-", "@", "\t", "\r", "\n"):
         return "'" + text
     return text
@@ -120,7 +128,7 @@ def sanitize_md_cell(value: str) -> str:
     """Escape markdown table structure and neutralize formula cells."""
     text = value.replace("\\", "\\\\").replace("|", "\\|")
     text = text.replace("\r\n", "<br/>").replace("\n", "<br/>").replace("\r", "<br/>")
-    stripped = text.lstrip(" \t")
+    stripped = text.lstrip(_STRIP_LEAD)
     if stripped and stripped[0] in ("=", "+", "-", "@"):
         return "'" + text
     return text

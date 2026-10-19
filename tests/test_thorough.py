@@ -142,5 +142,9 @@ def test_outline_limits():
 def test_search_bounds():
     assert search("docx", limit=1).count("\n") == 0
     assert search("zzz-no-match-xyz") == "no matches"
-    long_q = "x" * 500
-    assert isinstance(search(long_q), str)
+    with pytest.raises(ValueError, match="length cap"):
+        search("x" * 500)
+    with pytest.raises(ValueError, match="between 1 and 20"):
+        search("md", limit=0)
+    with pytest.raises(ValueError, match="between 1 and 20"):
+        search("md", limit=21)
