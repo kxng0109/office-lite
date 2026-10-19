@@ -2,11 +2,23 @@
 
 All notable changes follow Semantic Versioning.
 
+## [0.1.2] - 2026-10-17
+
+### Fixed
+
+- Fail-closed table caps on both builders with pagination for block tables.
+- Unicode-whitespace and zero-width formula smuggling neutralized.
+- Hyperlink destinations preserved as `[text](url)` in markdown output.
+- Multi-table CSV merges only on identical headers, otherwise refuses.
+- Strict search contract, group depth cap, per-item length caps, title control-character reject.
+- Dependency ceilings guard the next breaking major.
+- Trust and completeness section documents untrusted-content handling.
+
 ## [0.1.1] - 2026-10-17
 
 ### Fixed
 
-- Zip audit normalizes corrupt archives to ValueError, scans entries with an 8 MB audit-read budget, and uses float ratio math.
+- Zip audit normalizes corrupt archives to ValueError, scans entries with an 8 MB audit-read budget, and uses integer ratio math with no float precision loss.
 - Markdown tables sanitize formula cells and escape structure, csv delimiter allowlist is strict, and empty csv is rejected.
 - Block tables paginate per slide in pptx and enforce a pre-build cell cap in docx.
 - Contracts hardened: strict flavors, sources, titles, outlines, search limits, single CSV convention, and grouped-shape depth cap.

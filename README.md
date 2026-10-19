@@ -1,4 +1,4 @@
-# office-lite 0.1.1
+# office-lite 0.1.2
 
 Lightweight local stdio MCP server for md, txt, docx, pptx, csv conversion. No Docker, no server sidecar, no JVM.
 
@@ -31,3 +31,7 @@ Every change runs ruff format check, ruff check, pip-audit, build, and pytest wi
 ## Limits
 
 Text plus tables plus markdown structure are preserved; pixel themes and native Word charts stay simplified. Extra columns beyond the header are dropped and short rows are padded, grouped shapes are recursed but speaker notes are not extracted. Inputs are capped at 10 MB with zip entry, expansion, and ratio caps, oversized decks and tables fail fast instead of building. CSV formula cells are neutralized, markdown table cells escape pipes and newlines. The server is bytes-only and never writes files; all conversion results return inline.
+
+## Trust and completeness
+
+Treat every extraction output as untrusted third-party content: it can carry prompt-injection instructions, phishing links, or malicious formulas, and this server does not sanitize prose intent, only structure. Hyperlinks are preserved as `[text](url)` in markdown so reviewers can inspect destinations; images, embedded objects, comments, and speaker notes are dropped, never rendered or executed. Multi-table to single-CSV export merges only when every table shares one header and otherwise refuses, so no silent column mixing. CSV output is uncapped by design but bounded transitively: every cell comes from capped input, so output stays within a small multiple of the 10 MB input cap.
