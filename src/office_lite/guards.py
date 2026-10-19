@@ -88,7 +88,7 @@ def check_outline(headings: object, limit: int = MAX_OUTLINE_ITEMS) -> list[str]
 def safe_output_path(base_dir: Path, name: str) -> Path:
     base = base_dir.resolve()
     candidate = (base / name).resolve()
-    if candidate != base and base not in candidate.parents:
+    if candidate == base or base not in candidate.parents:
         raise ValueError("output path escapes base directory")
     return candidate
 
@@ -99,13 +99,14 @@ def ensure_base_dir(base_dir: Path) -> Path:
     return base
 
 
-def sanitize_csv_cell(value: str, for_human_sheet: bool = False) -> str:
-    stripped = value.lstrip(" \t") if value else value
+def sanitize_csv_cell(value: object, for_human_sheet: bool = False) -> str:
+    text = value if isinstance(value, str) else str(value)
+    stripped = text.lstrip(" \t") if text else text
     if stripped and stripped[0] in ("=", "+", "-", "@", "\t", "\r", "\n"):
         if for_human_sheet:
-            return "\t" + value
-        return "'" + value
-    return value
+            return "\t" + text
+        return "'" + text
+    return text
 
 
 def sanitize_md_cell(value: str) -> str:

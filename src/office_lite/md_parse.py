@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import threading
 from dataclasses import dataclass, field
 
 from markdown_it import MarkdownIt
@@ -16,12 +17,16 @@ from .guards import (
 )
 
 _parser: MarkdownIt | None = None
+_parser_lock = threading.Lock()
 
 
 def get_parser() -> MarkdownIt:
+    """Shared parser; stdio transport serves one request at a time."""
     global _parser
     if _parser is None:
-        _parser = MarkdownIt("commonmark").enable("table")
+        with _parser_lock:
+            if _parser is None:
+                _parser = MarkdownIt("commonmark").enable("table")
     return _parser
 
 

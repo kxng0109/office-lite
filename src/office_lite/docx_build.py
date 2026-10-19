@@ -6,7 +6,6 @@ import io
 
 from docx import Document
 
-from .csv_bridge import rows_to_csv_text  # noqa: F401  (re-export for DRY discovery)
 from .guards import check_size
 from .md_parse import DocBlocks, TableBlock
 
