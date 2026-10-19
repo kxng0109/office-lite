@@ -19,6 +19,9 @@ MAX_SLIDES = 300
 MAX_HEADINGS = 500
 MAX_TEXT_BLOCKS = 2000
 MAX_CODE_BLOCKS = 50
+MAX_OUTLINE_ITEMS = 200
+MAX_TITLE_CHARS = 200
+MAX_HEADING_CHARS = 500
 TRUNCATE_CHARS = 25000
 TRUNCATE_MARKER = "\n[truncated]"
 _XML_SCAN_HEAD = 1024 * 1024
@@ -60,6 +63,26 @@ def truncate_text(text: str, limit: int = TRUNCATE_CHARS) -> str:
     if len(text) <= limit:
         return text
     return text[:limit] + TRUNCATE_MARKER
+
+
+def check_title(title: str, limit: int = MAX_TITLE_CHARS) -> None:
+    if not isinstance(title, str) or not title or len(title) > limit:
+        raise ValueError("title must be 1-200 characters")
+
+
+def check_outline(headings: object, limit: int = MAX_OUTLINE_ITEMS) -> list[str]:
+    if not isinstance(headings, list):
+        raise ValueError("headings must be a list of strings")
+    if len(headings) > limit:
+        raise ValueError("outline exceeds item cap")
+    cleaned: list[str] = []
+    for item in headings:
+        if not isinstance(item, str) or not item.strip():
+            raise ValueError("outline items must be non-empty strings")
+        if len(item) > MAX_HEADING_CHARS:
+            raise ValueError("outline item exceeds length cap")
+        cleaned.append(item.strip())
+    return cleaned
 
 
 def safe_output_path(base_dir: Path, name: str) -> Path:

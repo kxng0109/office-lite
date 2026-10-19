@@ -52,7 +52,7 @@ def test_server_error_and_csv_text_paths():
         convert_office_out(base64.b64encode(b"PKxx").decode(), "xlsx", "markdown")
     txt_b64 = convert_markdown("plain line", "docx", "T", "text")
     assert "plain" in convert_office_out(txt_b64, "docx", "text")
-    assert "plain" in convert_office_out(txt_b64, "docx", "csv") or True
+    assert convert_office_out(txt_b64, "docx", "csv") == ""
     header, rows = read_csv_text("a;b\n1;2\n", ";")
     assert header == ["a", "b"]
     md = convert_table_in("a,b\n1,2", "markdown")

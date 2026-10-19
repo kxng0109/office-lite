@@ -69,8 +69,8 @@ def test_csv_injection_sanitized_in_export():
 
 def test_csv_bom_and_crlf():
     text = "\ufeffa,b\r\n1,2\r\n"
-    header, rows = read_csv_text(text)
-    assert header[0].strip("\ufeff") == "a" or "a" in header[0]
+    header, rows = read_csv_text(text)[:2]
+    assert header == ["a", "b"]
     assert rows == [["1", "2"]]
 
 
