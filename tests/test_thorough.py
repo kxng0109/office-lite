@@ -1,5 +1,4 @@
 import base64
-import binascii
 import io
 import zipfile
 
@@ -49,7 +48,7 @@ def test_oversized_rejected():
 
 
 def test_malformed_b64_and_zip_rejected():
-    with pytest.raises(binascii.Error):
+    with pytest.raises(ValueError, match="base64"):
         convert_office_out("!!!not-b64!!!", "docx", "markdown")
     with pytest.raises(zipfile.BadZipFile):
         convert_office_out(base64.b64encode(b"not-a-zip").decode(), "docx", "markdown")
