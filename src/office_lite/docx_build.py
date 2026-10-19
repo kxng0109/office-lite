@@ -3,15 +3,31 @@
 from __future__ import annotations
 
 import io
+import threading
 
 from docx import Document
 
-from .guards import MAX_CELLS, check_size
+from .guards import MAX_CELLS, MAX_TABLE_COLS, MAX_TABLES, MAX_TOTAL_CELLS, check_size
 from .md_parse import DocBlocks, TableBlock
+
+_cached_template: bytes | None = None
+_template_lock = threading.Lock()
+
+
+def _new_doc() -> Document:
+    """Fresh document from a cached default template (bytes re-parsed per call)."""
+    global _cached_template
+    if _cached_template is None:
+        with _template_lock:
+            if _cached_template is None:
+                buf = io.BytesIO()
+                Document().save(buf)
+                _cached_template = buf.getvalue()
+    return Document(io.BytesIO(_cached_template))
 
 
 def build_docx(blocks: DocBlocks, title: str = "Document") -> bytes:
-    doc = Document()
+    doc = _new_doc()
     if title:
         doc.add_heading(title, 0)
     for level, text in blocks.headings:
@@ -22,6 +38,10 @@ def build_docx(blocks: DocBlocks, title: str = "Document") -> bytes:
         doc.add_paragraph(item, style="List Bullet")
     for code in blocks.codes:
         doc.add_paragraph(code, style="Normal")
+    if len(blocks.tables) > MAX_TABLES:
+        raise ValueError("document exceeds table cap")
+    if sum(len(t.header or []) * (len(t.rows) + 1) for t in blocks.tables) > MAX_TOTAL_CELLS:
+        raise ValueError("document exceeds total cell cap")
     for table in blocks.tables:
         _add_table(doc, table)
     buf = io.BytesIO()
@@ -32,7 +52,7 @@ def build_docx(blocks: DocBlocks, title: str = "Document") -> bytes:
 
 
 def build_docx_from_rows(header: list[str], rows: list[list[str]], title: str = "Table") -> bytes:
-    doc = Document()
+    doc = _new_doc()
     if title:
         doc.add_heading(title, 1)
     _add_table(doc, TableBlock(header=header, rows=rows))
@@ -51,6 +71,8 @@ def _add_table(doc: Document, table: TableBlock) -> None:
     )
     if not header:
         return
+    if len(header) > MAX_TABLE_COLS:
+        raise ValueError("table exceeds column cap")
     if len(header) * (len(table.rows) + 1) > MAX_CELLS:
         raise ValueError("table exceeds cell cap")
     grid = doc.add_table(rows=1, cols=len(header))

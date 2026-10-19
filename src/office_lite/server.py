@@ -43,6 +43,8 @@ TOOLS_INDEX = [
 
 
 def _decode_office_b64(file_b64: str) -> bytes:
+    if not isinstance(file_b64, str):
+        raise ValueError("file_b64 must be a string")
     if len(file_b64) > MAX_INPUT_BYTES * 4 // 3 + 1024:
         raise ValueError("input exceeds size cap")
     try:
@@ -51,6 +53,7 @@ def _decode_office_b64(file_b64: str) -> bytes:
         raise ValueError("invalid base64 input") from exc
     check_size(raw)
     audit_zip_bytes(raw)
+    logger.info("decode input_b64=%d bytes=%d", len(file_b64), len(raw))
     return raw
 
 
@@ -76,7 +79,9 @@ def _b64(data: bytes) -> str:
     # Output size is bounded transitively: base64 expands input by 4/3, and
     # check_size caps input, so a >13.4 MB response is unreachable by construction.
     check_size(data)
-    return base64.b64encode(data).decode("ascii")
+    text = base64.b64encode(data).decode("ascii")
+    logger.info("encode bytes=%d b64=%d", len(data), len(text))
+    return text
 
 
 def _merge_tables(
@@ -94,13 +99,66 @@ def _merge_tables(
     return header, rows
 
 
-def _walk_tables(tables):
-    """Yield tables recursively, descending into nested cell tables."""
+def _docx_para_markdown_cell(cell) -> str:
+    """Cell text with hyperlinks preserved, paragraphs joined like cell.text."""
+    return "\n".join(_docx_para_markdown(p) for p in cell.paragraphs)
+
+
+def _walk_tables(tables, depth: int = 0):
+    """Yield tables recursively, descending into nested cell tables with a depth cap."""
+    if depth > MAX_GROUP_DEPTH:
+        raise ValueError("table nesting exceeds depth cap")
     for table in tables:
         yield table
         for row in table.rows:
             for cell in row.cells:
-                yield from _walk_tables(cell.tables)
+                yield from _walk_tables(cell.tables, depth + 1)
+
+
+def _w_t_text(elm) -> str:
+    """Text from w:t descendants only; w:r direct text mirrors w:t in some writers."""
+    texts = [t.text or "" for t in elm.iter() if isinstance(t.tag, str) and t.tag.endswith("}t")]
+    if texts:
+        return "".join(texts)
+    return elm.text or ""
+
+
+def _docx_para_markdown(paragraph) -> str:
+    """Paragraph text with hyperlinks preserved as [text](url)."""
+    try:
+        links = {h._hyperlink: (h.text, h.url) for h in paragraph.hyperlinks}
+    except Exception:
+        links = {}
+    parts: list[str] = []
+    for child in paragraph._p.iterchildren():
+        tag = child.tag.split("}")[-1] if isinstance(child.tag, str) else ""
+        if tag == "hyperlink":
+            text, url = links.get(child, (_w_t_text(child), ""))
+            parts.append(f"[{text}]({url})" if url else text)
+        elif tag == "r":
+            parts.append(_w_t_text(child))
+    text = "".join(parts)
+    return text if text.strip() else paragraph.text
+
+
+def _pptx_para_markdown(paragraph) -> str:
+    """Text-frame paragraph with run hyperlinks preserved as [text](url)."""
+    parts: list[str] = []
+    try:
+        runs = list(paragraph.runs)
+    except Exception:
+        return paragraph.text
+    for run in runs:
+        try:
+            address = run.hyperlink.address
+        except Exception:
+            address = ""
+        if address:
+            parts.append(f"[{run.text}]({address})")
+        else:
+            parts.append(run.text)
+    text = "".join(parts)
+    return text if text.strip() else paragraph.text
 
 
 def _walk_shapes(shapes, depth: int = 0):
@@ -119,6 +177,8 @@ def _walk_shapes(shapes, depth: int = 0):
 def convert_markdown(
     content: str, target: str, title: str = "Document", flavor: str = "markdown"
 ) -> str:
+    if not isinstance(content, str):
+        raise ValueError("content must be a string")
     if target not in ("docx", "pptx"):
         raise ValueError("target must be docx or pptx")
     if flavor not in ("markdown", "text"):
@@ -133,6 +193,8 @@ def convert_markdown(
     title="Convert table in", description="Convert csv text to docx, pptx, or markdown table"
 )
 def convert_table_in(csv_text: str, target: str, title: str = "Table", delimiter: str = ",") -> str:
+    if not isinstance(csv_text, str):
+        raise ValueError("csv_text must be a string")
     if target not in ("docx", "pptx", "markdown", "csv"):
         raise ValueError("target must be docx, pptx, markdown, or csv")
     check_title(title)
@@ -162,14 +224,15 @@ def convert_office_out(file_b64: str, source: str, target: str) -> str:
     raw = _decode_office_b64(file_b64)
     if source == "docx":
         doc = _open_docx(raw)
-        paras = [p.text for p in doc.paragraphs if p.text.strip()]
+        paras = [_docx_para_markdown(p) for p in doc.paragraphs]
+        paras = [p for p in paras if p.strip()]
         tables: list[str] = []
         csv_blocks: list[tuple[list[str], list[list[str]]]] = []
         for table in _walk_tables(doc.tables):
             if not table.rows:
                 continue
-            header = [c.text for c in table.rows[0].cells]
-            rows = [[c.text for c in r.cells] for r in table.rows[1:]]
+            header = [_docx_para_markdown_cell(c) for c in table.rows[0].cells]
+            rows = [[_docx_para_markdown_cell(c) for c in r.cells] for r in table.rows[1:]]
             if target == "csv":
                 csv_blocks.append((header, rows))
             else:
@@ -197,8 +260,10 @@ def convert_office_out(file_b64: str, source: str, target: str) -> str:
                 else:
                     parts.append(rows_to_markdown(header, rows, TRUNCATE_CHARS))
             elif shape.has_text_frame:
-                if shape.text.strip():
-                    parts.append(shape.text.strip())
+                for paragraph in shape.text_frame.paragraphs:
+                    rendered = _pptx_para_markdown(paragraph)
+                    if rendered.strip():
+                        parts.append(rendered.strip())
         slides.append("\n\n".join(parts))
     if target == "csv":
         if not csv_blocks:
