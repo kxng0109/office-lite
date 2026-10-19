@@ -15,16 +15,9 @@ from office_lite.server import (
 )
 
 
-def test_guards_truncate_and_jail(tmp_path):
+def test_guards_truncate_and_sanitize():
     long = "x" * (guards.TRUNCATE_CHARS + 10)
     assert guards.TRUNCATE_MARKER in guards.truncate_text(long)
-    base = tmp_path
-    assert guards.safe_output_path(base, "a.docx").name == "a.docx"
-    try:
-        guards.safe_output_path(base, "../evil.docx")
-        raise AssertionError("should jail")
-    except ValueError:
-        pass
     assert guards.sanitize_csv_cell("=1+1").startswith("'")
     assert guards.sanitize_csv_cell("plain") == "plain"
 

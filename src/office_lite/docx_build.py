@@ -7,7 +7,14 @@ import threading
 
 from docx import Document
 
-from .guards import MAX_CELLS, MAX_TABLE_COLS, MAX_TABLES, MAX_TOTAL_CELLS, check_size
+from .guards import (
+    MAX_CELLS,
+    MAX_TABLE_COLS,
+    MAX_TABLES,
+    MAX_TOTAL_CELLS,
+    check_size,
+    sanitize_csv_cell,
+)
 from .md_parse import DocBlocks, TableBlock
 
 _cached_template: bytes | None = None
@@ -78,9 +85,9 @@ def _add_table(doc: Document, table: TableBlock) -> None:
     grid = doc.add_table(rows=1, cols=len(header))
     grid.style = "Light Grid Accent 1"
     for i, name in enumerate(header):
-        grid.cell(0, i).text = name
+        grid.cell(0, i).text = sanitize_csv_cell(name)
     for row in table.rows:
         padded = (row + [""] * len(header))[: len(header)]
         cells = grid.add_row().cells
         for i, value in enumerate(padded):
-            cells[i].text = value
+            cells[i].text = sanitize_csv_cell(value)

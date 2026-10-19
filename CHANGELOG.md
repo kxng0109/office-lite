@@ -2,6 +2,17 @@
 
 All notable changes follow Semantic Versioning.
 
+## [0.1.3] - 2026-10-17
+
+### Fixed
+
+- Sink-side formula neutralization for docx and pptx builds; hyperlink destinations preserved on extraction.
+- Generated Unicode strip set covering zero-width and format smugglers, with exhaustive per-codepoint tests.
+- Rendering recursion depth caps, table-count and total-cell budgets, fail-closed row caps on every ingestion path.
+- Strict input typing on every tool, control-character titles rejected but emoji-safe, search contract strict.
+- Removed dead path-jail helpers; server is bytes-only and never writes files.
+- Single-source version, corrected changelog math wording.
+
 ## [0.1.2] - 2026-10-17
 
 ### Fixed

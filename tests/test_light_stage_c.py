@@ -40,8 +40,3 @@ def test_walk_shapes_yields_plain_shapes():
 def test_sanitize_coerces_non_string():
     assert guards.sanitize_csv_cell(123) == "123"
     assert guards.sanitize_csv_cell(None) == "None"
-
-
-def test_path_jail_rejects_base_itself(tmp_path):
-    with pytest.raises(ValueError, match="escapes"):
-        guards.safe_output_path(tmp_path, ".")
